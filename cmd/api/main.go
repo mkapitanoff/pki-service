@@ -68,6 +68,7 @@ func main() {
 
 	signSvc := service.NewSignService(db, ncClient, store, queries, nil, cfg.App.VerifyBaseURL)
 	signHandler := handler.NewSignHandler(signSvc, queries)
+	verifyHandler := handler.NewVerifyHandler(queries)
 
 	r := chi.NewRouter()
 	r.Use(middleware.Logger)
@@ -77,6 +78,11 @@ func main() {
 	r.Get("/health", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		fmt.Fprintf(w, `{"status":"ok","env":"%s"}`, cfg.App.Env)
+	})
+
+	r.Group(func(pub chi.Router) {
+		pub.Use(handler.RateLimiter(cfg.RateLimit.VerifyPerMinute))
+		pub.Get("/verify/{signature_id}", verifyHandler.HandleVerify)
 	})
 
 	r.Route("/api/v1", func(api chi.Router) {
