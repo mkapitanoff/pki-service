@@ -572,3 +572,16 @@ git push origin main
 4. git commit -m "feat: ..."
 5. git push origin main
 6. Отчитаться: список созданных файлов + результаты тестов
+
+---
+
+## Правила работы с файлами и git (Claude Code)
+
+CRITICAL: Always work in the main project directory, never in worktrees.
+Before writing any file, verify: pwd must be the project root (e.g. /Users/user/pki-service).
+If pwd contains ".claude/worktrees" — STOP and cd to the project root first.
+
+After all tests pass:
+1. git add .
+2. git commit -m "feat: <description>"
+3. git push origin main
