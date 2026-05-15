@@ -54,6 +54,7 @@ CREATE TABLE signatures (
     tenant_id       UUID NOT NULL,
     version_number  INT NOT NULL,
     sequence_num    INT NOT NULL,
+
     cms_b64         TEXT NOT NULL,
     role            TEXT NOT NULL,
     signer_iin      TEXT,
@@ -62,16 +63,20 @@ CREATE TABLE signatures (
     org_name        TEXT,
     signer_type     TEXT NOT NULL,
     basis           TEXT,
+
     cert_serial     TEXT NOT NULL,
     cert_not_before TIMESTAMPTZ NOT NULL,
     cert_not_after  TIMESTAMPTZ NOT NULL,
     ca_name         TEXT NOT NULL,
+
     ocsp_status     ocsp_status_type NOT NULL,
     ocsp_checked_at TIMESTAMPTZ NOT NULL,
     tsp_time        TIMESTAMPTZ,
     sha256_hash     TEXT NOT NULL,
     sign_format     TEXT NOT NULL DEFAULT 'CAdES (CMS, PKCS#7)',
+
     qr_url          TEXT NOT NULL,
+
     signed_at       TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX idx_signatures_document ON signatures(document_id);

@@ -11,11 +11,14 @@ import (
 )
 
 type Querier interface {
+	CreateAuditLog(ctx context.Context, arg CreateAuditLogParams) error
 	CreateDocument(ctx context.Context, arg CreateDocumentParams) (Document, error)
+	CreateDocumentVersion(ctx context.Context, arg CreateDocumentVersionParams) (DocumentVersion, error)
 	CreateSignature(ctx context.Context, arg CreateSignatureParams) (Signature, error)
-	GetAPIKeyByHash(ctx context.Context, keyHash string) (GetAPIKeyByHashRow, error)
+	CreateSignatureWithID(ctx context.Context, arg CreateSignatureWithIDParams) (Signature, error)
+	GetAPIKeyByHash(ctx context.Context, keyHash string) (ApiKey, error)
 	GetDocument(ctx context.Context, arg GetDocumentParams) (Document, error)
-	GetSignature(ctx context.Context, id uuid.UUID) (Signature, error)
+	GetSignature(ctx context.Context, arg GetSignatureParams) (Signature, error)
 	GetSignaturesByDocument(ctx context.Context, arg GetSignaturesByDocumentParams) ([]Signature, error)
 	GetTenant(ctx context.Context, id uuid.UUID) (Tenant, error)
 	UpdateAPIKeyLastUsed(ctx context.Context, id uuid.UUID) error

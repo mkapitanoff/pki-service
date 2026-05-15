@@ -16,15 +16,18 @@ import (
 const createSignature = `-- name: CreateSignature :one
 INSERT INTO signatures (
     document_id, tenant_id, version_number, sequence_num,
-    cms_b64, role, signer_iin, signer_name, signer_bin,
-    org_name, signer_type, basis, cert_serial,
-    cert_not_before, cert_not_after, ca_name,
-    ocsp_status, ocsp_checked_at, tsp_time,
-    sha256_hash, sign_format, qr_url
+    cms_b64, role, signer_iin, signer_name, signer_bin, org_name,
+    signer_type, basis,
+    cert_serial, cert_not_before, cert_not_after, ca_name,
+    ocsp_status, ocsp_checked_at, tsp_time, sha256_hash, sign_format,
+    qr_url
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9,
-    $10, $11, $12, $13, $14, $15, $16,
-    $17, $18, $19, $20, $21, $22
+    $1, $2, $3, $4,
+    $5, $6, $7, $8, $9, $10,
+    $11, $12,
+    $13, $14, $15, $16,
+    $17, $18, $19, $20, $21,
+    $22
 )
 RETURNING id, document_id, tenant_id, version_number, sequence_num, cms_b64, role, signer_iin, signer_name, signer_bin, org_name, signer_type, basis, cert_serial, cert_not_before, cert_not_after, ca_name, ocsp_status, ocsp_checked_at, tsp_time, sha256_hash, sign_format, qr_url, signed_at
 `
@@ -109,13 +112,115 @@ func (q *Queries) CreateSignature(ctx context.Context, arg CreateSignatureParams
 	return i, err
 }
 
-const getSignature = `-- name: GetSignature :one
-SELECT id, document_id, tenant_id, version_number, sequence_num, cms_b64, role, signer_iin, signer_name, signer_bin, org_name, signer_type, basis, cert_serial, cert_not_before, cert_not_after, ca_name, ocsp_status, ocsp_checked_at, tsp_time, sha256_hash, sign_format, qr_url, signed_at FROM signatures
-WHERE id = $1
+const createSignatureWithID = `-- name: CreateSignatureWithID :one
+INSERT INTO signatures (
+    id, document_id, tenant_id, version_number, sequence_num,
+    cms_b64, role, signer_iin, signer_name, signer_bin,
+    org_name, signer_type, basis, cert_serial,
+    cert_not_before, cert_not_after, ca_name,
+    ocsp_status, ocsp_checked_at, tsp_time,
+    sha256_hash, sign_format, qr_url
+) VALUES (
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
+    $11, $12, $13, $14, $15, $16, $17,
+    $18, $19, $20, $21, $22, $23
+) RETURNING id, document_id, tenant_id, version_number, sequence_num, cms_b64, role, signer_iin, signer_name, signer_bin, org_name, signer_type, basis, cert_serial, cert_not_before, cert_not_after, ca_name, ocsp_status, ocsp_checked_at, tsp_time, sha256_hash, sign_format, qr_url, signed_at
 `
 
-func (q *Queries) GetSignature(ctx context.Context, id uuid.UUID) (Signature, error) {
-	row := q.db.QueryRowContext(ctx, getSignature, id)
+type CreateSignatureWithIDParams struct {
+	ID            uuid.UUID      `json:"id"`
+	DocumentID    uuid.UUID      `json:"document_id"`
+	TenantID      uuid.UUID      `json:"tenant_id"`
+	VersionNumber int32          `json:"version_number"`
+	SequenceNum   int32          `json:"sequence_num"`
+	CmsB64        string         `json:"cms_b64"`
+	Role          string         `json:"role"`
+	SignerIin     sql.NullString `json:"signer_iin"`
+	SignerName    string         `json:"signer_name"`
+	SignerBin     sql.NullString `json:"signer_bin"`
+	OrgName       sql.NullString `json:"org_name"`
+	SignerType    string         `json:"signer_type"`
+	Basis         sql.NullString `json:"basis"`
+	CertSerial    string         `json:"cert_serial"`
+	CertNotBefore time.Time      `json:"cert_not_before"`
+	CertNotAfter  time.Time      `json:"cert_not_after"`
+	CaName        string         `json:"ca_name"`
+	OcspStatus    OcspStatusType `json:"ocsp_status"`
+	OcspCheckedAt time.Time      `json:"ocsp_checked_at"`
+	TspTime       sql.NullTime   `json:"tsp_time"`
+	Sha256Hash    string         `json:"sha256_hash"`
+	SignFormat    string         `json:"sign_format"`
+	QrUrl         string         `json:"qr_url"`
+}
+
+func (q *Queries) CreateSignatureWithID(ctx context.Context, arg CreateSignatureWithIDParams) (Signature, error) {
+	row := q.db.QueryRowContext(ctx, createSignatureWithID,
+		arg.ID,
+		arg.DocumentID,
+		arg.TenantID,
+		arg.VersionNumber,
+		arg.SequenceNum,
+		arg.CmsB64,
+		arg.Role,
+		arg.SignerIin,
+		arg.SignerName,
+		arg.SignerBin,
+		arg.OrgName,
+		arg.SignerType,
+		arg.Basis,
+		arg.CertSerial,
+		arg.CertNotBefore,
+		arg.CertNotAfter,
+		arg.CaName,
+		arg.OcspStatus,
+		arg.OcspCheckedAt,
+		arg.TspTime,
+		arg.Sha256Hash,
+		arg.SignFormat,
+		arg.QrUrl,
+	)
+	var i Signature
+	err := row.Scan(
+		&i.ID,
+		&i.DocumentID,
+		&i.TenantID,
+		&i.VersionNumber,
+		&i.SequenceNum,
+		&i.CmsB64,
+		&i.Role,
+		&i.SignerIin,
+		&i.SignerName,
+		&i.SignerBin,
+		&i.OrgName,
+		&i.SignerType,
+		&i.Basis,
+		&i.CertSerial,
+		&i.CertNotBefore,
+		&i.CertNotAfter,
+		&i.CaName,
+		&i.OcspStatus,
+		&i.OcspCheckedAt,
+		&i.TspTime,
+		&i.Sha256Hash,
+		&i.SignFormat,
+		&i.QrUrl,
+		&i.SignedAt,
+	)
+	return i, err
+}
+
+const getSignature = `-- name: GetSignature :one
+SELECT id, document_id, tenant_id, version_number, sequence_num, cms_b64, role, signer_iin, signer_name, signer_bin, org_name, signer_type, basis, cert_serial, cert_not_before, cert_not_after, ca_name, ocsp_status, ocsp_checked_at, tsp_time, sha256_hash, sign_format, qr_url, signed_at FROM signatures
+WHERE id = $1 AND tenant_id = $2
+`
+
+type GetSignatureParams struct {
+	ID       uuid.UUID `json:"id"`
+	TenantID uuid.UUID `json:"tenant_id"`
+}
+
+func (q *Queries) GetSignature(ctx context.Context, arg GetSignatureParams) (Signature, error) {
+	row := q.db.QueryRowContext(ctx, getSignature, arg.ID, arg.TenantID)
 	var i Signature
 	err := row.Scan(
 		&i.ID,

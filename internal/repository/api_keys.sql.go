@@ -7,36 +7,18 @@ package repository
 
 import (
 	"context"
-	"database/sql"
-	"time"
 
 	"github.com/google/uuid"
 )
 
 const getAPIKeyByHash = `-- name: GetAPIKeyByHash :one
-SELECT ak.id, ak.tenant_id, ak.key_hash, ak.label, ak.is_active, ak.last_used_at, ak.expires_at, ak.created_at, t.name as tenant_name, t.type as tenant_type, t.is_active as tenant_is_active
-FROM api_keys ak
-JOIN tenants t ON t.id = ak.tenant_id
-WHERE ak.key_hash = $1 AND ak.is_active = true
+SELECT id, tenant_id, key_hash, label, is_active, last_used_at, expires_at, created_at FROM api_keys
+WHERE key_hash = $1 AND is_active = true
 `
 
-type GetAPIKeyByHashRow struct {
-	ID             uuid.UUID    `json:"id"`
-	TenantID       uuid.UUID    `json:"tenant_id"`
-	KeyHash        string       `json:"key_hash"`
-	Label          string       `json:"label"`
-	IsActive       bool         `json:"is_active"`
-	LastUsedAt     sql.NullTime `json:"last_used_at"`
-	ExpiresAt      sql.NullTime `json:"expires_at"`
-	CreatedAt      time.Time    `json:"created_at"`
-	TenantName     string       `json:"tenant_name"`
-	TenantType     TenantType   `json:"tenant_type"`
-	TenantIsActive bool         `json:"tenant_is_active"`
-}
-
-func (q *Queries) GetAPIKeyByHash(ctx context.Context, keyHash string) (GetAPIKeyByHashRow, error) {
+func (q *Queries) GetAPIKeyByHash(ctx context.Context, keyHash string) (ApiKey, error) {
 	row := q.db.QueryRowContext(ctx, getAPIKeyByHash, keyHash)
-	var i GetAPIKeyByHashRow
+	var i ApiKey
 	err := row.Scan(
 		&i.ID,
 		&i.TenantID,
@@ -46,15 +28,13 @@ func (q *Queries) GetAPIKeyByHash(ctx context.Context, keyHash string) (GetAPIKe
 		&i.LastUsedAt,
 		&i.ExpiresAt,
 		&i.CreatedAt,
-		&i.TenantName,
-		&i.TenantType,
-		&i.TenantIsActive,
 	)
 	return i, err
 }
 
 const updateAPIKeyLastUsed = `-- name: UpdateAPIKeyLastUsed :exec
-UPDATE api_keys SET last_used_at = now()
+UPDATE api_keys
+SET last_used_at = now()
 WHERE id = $1
 `
 

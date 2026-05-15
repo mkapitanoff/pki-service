@@ -14,17 +14,22 @@ import (
 )
 
 const createDocument = `-- name: CreateDocument :one
-INSERT INTO documents (tenant_id, title, s3_key_original, s3_key_current, metadata)
-VALUES ($1, $2, $3, $4, $5)
+INSERT INTO documents (
+    tenant_id, title, s3_key_original, s3_key_current, current_version, status, metadata
+) VALUES (
+    $1, $2, $3, $4, $5, $6, $7
+)
 RETURNING id, tenant_id, title, s3_key_original, s3_key_current, current_version, status, metadata, created_at, updated_at
 `
 
 type CreateDocumentParams struct {
-	TenantID      uuid.UUID             `json:"tenant_id"`
-	Title         sql.NullString        `json:"title"`
-	S3KeyOriginal string                `json:"s3_key_original"`
-	S3KeyCurrent  string                `json:"s3_key_current"`
-	Metadata      pqtype.NullRawMessage `json:"metadata"`
+	TenantID       uuid.UUID             `json:"tenant_id"`
+	Title          sql.NullString        `json:"title"`
+	S3KeyOriginal  string                `json:"s3_key_original"`
+	S3KeyCurrent   string                `json:"s3_key_current"`
+	CurrentVersion int32                 `json:"current_version"`
+	Status         DocStatus             `json:"status"`
+	Metadata       pqtype.NullRawMessage `json:"metadata"`
 }
 
 func (q *Queries) CreateDocument(ctx context.Context, arg CreateDocumentParams) (Document, error) {
@@ -33,6 +38,8 @@ func (q *Queries) CreateDocument(ctx context.Context, arg CreateDocumentParams) 
 		arg.Title,
 		arg.S3KeyOriginal,
 		arg.S3KeyCurrent,
+		arg.CurrentVersion,
+		arg.Status,
 		arg.Metadata,
 	)
 	var i Document
@@ -47,6 +54,37 @@ func (q *Queries) CreateDocument(ctx context.Context, arg CreateDocumentParams) 
 		&i.Metadata,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const createDocumentVersion = `-- name: CreateDocumentVersion :one
+INSERT INTO document_versions (document_id, tenant_id, version, s3_key)
+VALUES ($1, $2, $3, $4) RETURNING id, document_id, tenant_id, version, s3_key, created_at
+`
+
+type CreateDocumentVersionParams struct {
+	DocumentID uuid.UUID `json:"document_id"`
+	TenantID   uuid.UUID `json:"tenant_id"`
+	Version    int32     `json:"version"`
+	S3Key      string    `json:"s3_key"`
+}
+
+func (q *Queries) CreateDocumentVersion(ctx context.Context, arg CreateDocumentVersionParams) (DocumentVersion, error) {
+	row := q.db.QueryRowContext(ctx, createDocumentVersion,
+		arg.DocumentID,
+		arg.TenantID,
+		arg.Version,
+		arg.S3Key,
+	)
+	var i DocumentVersion
+	err := row.Scan(
+		&i.ID,
+		&i.DocumentID,
+		&i.TenantID,
+		&i.Version,
+		&i.S3Key,
+		&i.CreatedAt,
 	)
 	return i, err
 }
@@ -80,19 +118,20 @@ func (q *Queries) GetDocument(ctx context.Context, arg GetDocumentParams) (Docum
 }
 
 const updateDocumentStatus = `-- name: UpdateDocumentStatus :one
-UPDATE documents SET status = $1, updated_at = now()
-WHERE id = $2 AND tenant_id = $3
+UPDATE documents
+SET status = $3, updated_at = now()
+WHERE id = $1 AND tenant_id = $2
 RETURNING id, tenant_id, title, s3_key_original, s3_key_current, current_version, status, metadata, created_at, updated_at
 `
 
 type UpdateDocumentStatusParams struct {
-	Status   DocStatus `json:"status"`
 	ID       uuid.UUID `json:"id"`
 	TenantID uuid.UUID `json:"tenant_id"`
+	Status   DocStatus `json:"status"`
 }
 
 func (q *Queries) UpdateDocumentStatus(ctx context.Context, arg UpdateDocumentStatusParams) (Document, error) {
-	row := q.db.QueryRowContext(ctx, updateDocumentStatus, arg.Status, arg.ID, arg.TenantID)
+	row := q.db.QueryRowContext(ctx, updateDocumentStatus, arg.ID, arg.TenantID, arg.Status)
 	var i Document
 	err := row.Scan(
 		&i.ID,
@@ -110,30 +149,27 @@ func (q *Queries) UpdateDocumentStatus(ctx context.Context, arg UpdateDocumentSt
 }
 
 const updateDocumentVersion = `-- name: UpdateDocumentVersion :one
-UPDATE documents SET
-    s3_key_current = $1,
-    current_version = $2,
-    status = $3,
-    updated_at = now()
-WHERE id = $4 AND tenant_id = $5
+UPDATE documents
+SET s3_key_current = $3, current_version = $4, status = $5, updated_at = now()
+WHERE id = $1 AND tenant_id = $2
 RETURNING id, tenant_id, title, s3_key_original, s3_key_current, current_version, status, metadata, created_at, updated_at
 `
 
 type UpdateDocumentVersionParams struct {
+	ID             uuid.UUID `json:"id"`
+	TenantID       uuid.UUID `json:"tenant_id"`
 	S3KeyCurrent   string    `json:"s3_key_current"`
 	CurrentVersion int32     `json:"current_version"`
 	Status         DocStatus `json:"status"`
-	ID             uuid.UUID `json:"id"`
-	TenantID       uuid.UUID `json:"tenant_id"`
 }
 
 func (q *Queries) UpdateDocumentVersion(ctx context.Context, arg UpdateDocumentVersionParams) (Document, error) {
 	row := q.db.QueryRowContext(ctx, updateDocumentVersion,
+		arg.ID,
+		arg.TenantID,
 		arg.S3KeyCurrent,
 		arg.CurrentVersion,
 		arg.Status,
-		arg.ID,
-		arg.TenantID,
 	)
 	var i Document
 	err := row.Scan(
