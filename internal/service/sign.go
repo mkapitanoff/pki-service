@@ -304,6 +304,8 @@ func (s *SignService) Sign(ctx context.Context, input SignInput) (*SignResult, e
 			"document_id":  input.DocumentID,
 			"signature_id": createdSig.ID,
 			"tenant_id":    input.TenantID,
+			"signer_name":  createdSig.SignerName,
+			"signed_at":    createdSig.SignedAt,
 		})
 	}
 

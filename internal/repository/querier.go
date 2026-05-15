@@ -16,14 +16,20 @@ type Querier interface {
 	CreateDocumentVersion(ctx context.Context, arg CreateDocumentVersionParams) (DocumentVersion, error)
 	CreateSignature(ctx context.Context, arg CreateSignatureParams) (Signature, error)
 	CreateSignatureWithID(ctx context.Context, arg CreateSignatureWithIDParams) (Signature, error)
+	CreateWebhookDelivery(ctx context.Context, arg CreateWebhookDeliveryParams) (WebhookDelivery, error)
 	GetAPIKeyByHash(ctx context.Context, keyHash string) (ApiKey, error)
 	GetDocument(ctx context.Context, arg GetDocumentParams) (Document, error)
 	GetSignature(ctx context.Context, arg GetSignatureParams) (Signature, error)
 	GetSignaturesByDocument(ctx context.Context, arg GetSignaturesByDocumentParams) ([]Signature, error)
 	GetTenant(ctx context.Context, id uuid.UUID) (Tenant, error)
+	GetWebhookByID(ctx context.Context, id uuid.UUID) (Webhook, error)
+	GetWebhookDeliveryByID(ctx context.Context, id uuid.UUID) (WebhookDelivery, error)
+	GetWebhooksByTenantAndEvent(ctx context.Context, arg GetWebhooksByTenantAndEventParams) ([]Webhook, error)
 	UpdateAPIKeyLastUsed(ctx context.Context, id uuid.UUID) error
 	UpdateDocumentStatus(ctx context.Context, arg UpdateDocumentStatusParams) (Document, error)
 	UpdateDocumentVersion(ctx context.Context, arg UpdateDocumentVersionParams) (Document, error)
+	UpdateWebhookDeliveryFailed(ctx context.Context, arg UpdateWebhookDeliveryFailedParams) error
+	UpdateWebhookDeliverySuccess(ctx context.Context, id uuid.UUID) error
 }
 
 var _ Querier = (*Queries)(nil)
