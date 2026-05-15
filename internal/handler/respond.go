@@ -19,6 +19,7 @@ func respondJSON(w http.ResponseWriter, status int, body any) {
 }
 
 func respondError(w http.ResponseWriter, err error) {
+	if err != nil { println("ERROR:", err.Error()) }
 	ae := apperr.As(err)
 	if ae == nil {
 		ae = apperr.ErrInternal

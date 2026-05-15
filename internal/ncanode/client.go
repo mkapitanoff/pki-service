@@ -50,7 +50,7 @@ type VerifyResult struct {
 // NCANodeClient is the crypto boundary. No PKCS#7 / x509 logic lives outside
 // this package.
 type NCANodeClient interface {
-	VerifyCMS(ctx context.Context, cmsBase64 string, docSHA256 string) (*VerifyResult, error)
+	VerifyCMS(ctx context.Context, cmsBase64 string, docBase64 string) (*VerifyResult, error)
 	GetTSP(ctx context.Context, dataSHA256 string) (time.Time, error)
 }
 
@@ -86,10 +86,6 @@ func NewHTTPClient(opts Options) *HTTPClient {
 
 type cmsVerifyRequest struct {
 	CMS  string `json:"cms"`
-	Data string `json:"data"`
-}
-
-type tspCreateRequest struct {
 	Data string `json:"data"`
 }
 
@@ -137,17 +133,12 @@ type cmsVerifyResponse struct {
 	Signers []ncaSigner `json:"signers"`
 }
 
-type tspCreateResponse struct {
-	Status  int     `json:"status"`
-	Message string  `json:"message"`
-	TSP     *ncaTSP `json:"tsp"`
-}
-
-// VerifyCMS posts the CMS + document hash to {url}/cms/verify and normalizes
-// the response. Returns ErrCMSInvalid / ErrCertRevoked for business failures.
-func (c *HTTPClient) VerifyCMS(ctx context.Context, cmsBase64 string, docSHA256 string) (*VerifyResult, error) {
+// VerifyCMS posts the CMS + full document base64 to {url}/cms/verify and
+// normalizes the response. Returns ErrCMSInvalid / ErrCertRevoked for business
+// failures. TSP time is read from signer.tsp.genTime in the response.
+func (c *HTTPClient) VerifyCMS(ctx context.Context, cmsBase64 string, docBase64 string) (*VerifyResult, error) {
 	var resp cmsVerifyResponse
-	if err := c.postJSON(ctx, "/cms/verify", cmsVerifyRequest{CMS: cmsBase64, Data: docSHA256}, &resp); err != nil {
+	if err := c.postJSON(ctx, "/cms/verify", cmsVerifyRequest{CMS: cmsBase64, Data: docBase64}, &resp); err != nil {
 		return nil, err
 	}
 
@@ -203,16 +194,11 @@ func (c *HTTPClient) VerifyCMS(ctx context.Context, cmsBase64 string, docSHA256 
 	}, nil
 }
 
-// GetTSP posts the data hash to {url}/tsp/create and returns the timestamp.
-func (c *HTTPClient) GetTSP(ctx context.Context, dataSHA256 string) (time.Time, error) {
-	var resp tspCreateResponse
-	if err := c.postJSON(ctx, "/tsp/create", tspCreateRequest{Data: dataSHA256}, &resp); err != nil {
-		return time.Time{}, err
-	}
-	if resp.TSP == nil || resp.TSP.GenTime.IsZero() {
-		return time.Time{}, fmt.Errorf("ncanode: tsp response missing genTime")
-	}
-	return resp.TSP.GenTime, nil
+// GetTSP is a no-op in NCANode v3: TSP time is returned as part of the
+// VerifyCMS response (signer.tsp.genTime). Callers should use
+// VerifyResult.TSPTime directly.
+func (c *HTTPClient) GetTSP(_ context.Context, _ string) (time.Time, error) {
+	return time.Now().UTC(), nil
 }
 
 func normalizeOCSP(o *ncaOCSP) string {

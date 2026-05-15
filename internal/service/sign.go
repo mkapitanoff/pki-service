@@ -4,9 +4,10 @@ import (
 	"context"
 	"crypto/sha256"
 	"database/sql"
-	stderrors "errors"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	stderrors "errors"
 	"fmt"
 
 	"github.com/google/uuid"
@@ -96,12 +97,13 @@ func (s *SignService) Sign(ctx context.Context, input SignInput) (*SignResult, e
 		return nil, apperr.ErrInternal.WithCause(err)
 	}
 
-	// 4. SHA-256 of the PDF.
+	// 4. SHA-256 of the PDF (stored in DB as sha256_hash).
 	sum := sha256.Sum256(pdfBytes)
 	docSHA256 := hex.EncodeToString(sum[:])
+	docBase64 := base64.StdEncoding.EncodeToString(pdfBytes)
 
 	// 5. Verify CMS. 6. Extract cert data. 7. Revoked -> 422.
-	vr, err := s.ncanode.VerifyCMS(ctx, input.CMS, docSHA256)
+	vr, err := s.ncanode.VerifyCMS(ctx, input.CMS, docBase64)
 	if err != nil {
 		switch {
 		case stderrors.Is(err, ncanode.ErrCMSInvalid):
@@ -119,11 +121,8 @@ func (s *SignService) Sign(ctx context.Context, input SignInput) (*SignResult, e
 		return nil, apperr.ErrCertRevoked
 	}
 
-	// 8. Timestamp.
-	tspTime, err := s.ncanode.GetTSP(ctx, docSHA256)
-	if err != nil {
-		return nil, apperr.ErrInternal.WithCause(err)
-	}
+	// 8. TSP time comes from the CMS verify response (NCANode v3).
+	tspTime := vr.TSPTime
 
 	// 9. sequence_num = count(existing) + 1.
 	existing, err := s.queries.GetSignaturesByDocument(ctx, repository.GetSignaturesByDocumentParams{

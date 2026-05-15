@@ -38,7 +38,7 @@ func (m *MockNCANodeClient) RegisterInvalid(cms string) {
 	m.invalid[cms] = true
 }
 
-func (m *MockNCANodeClient) VerifyCMS(ctx context.Context, cmsBase64 string, docSHA256 string) (*VerifyResult, error) {
+func (m *MockNCANodeClient) VerifyCMS(ctx context.Context, cmsBase64 string, docBase64 string) (*VerifyResult, error) {
 	m.mu.RLock()
 	invalid := m.invalid[cmsBase64]
 	revoked := m.revoked[cmsBase64]
