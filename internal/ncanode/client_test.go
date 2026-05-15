@@ -121,12 +121,34 @@ func TestVerifyCMS_InvalidCertFlag(t *testing.T) {
 	require.ErrorIs(t, err, ErrCMSInvalid)
 }
 
-// GetTSP is a no-op in NCANode v3 — TSP time comes from VerifyCMS response.
-func TestGetTSP_NoOp(t *testing.T) {
-	c := NewHTTPClient(Options{URL: "http://localhost:0", Timeout: 5 * time.Second})
+func TestGetTSP_Success(t *testing.T) {
+	want := time.Date(2026, 5, 15, 14, 10, 4, 0, time.UTC)
+	c, srv := newTestClient(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "/tsp/create", r.URL.Path)
+		var req tspCreateRequest
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&req))
+		require.Equal(t, "abc123", req.Data)
+
+		resp := tspCreateResponse{Status: 0, TSP: &ncaTSP{GenTime: want}}
+		w.Header().Set("Content-Type", "application/json")
+		require.NoError(t, json.NewEncoder(w).Encode(resp))
+	})
+	defer srv.Close()
+
 	got, err := c.GetTSP(context.Background(), "abc123")
 	require.NoError(t, err)
-	require.False(t, got.IsZero())
+	require.True(t, want.Equal(got))
+}
+
+func TestGetTSP_MissingGenTime(t *testing.T) {
+	c, srv := newTestClient(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(tspCreateResponse{Status: 0})
+	})
+	defer srv.Close()
+
+	_, err := c.GetTSP(context.Background(), "abc123")
+	require.Error(t, err)
 }
 
 func TestMockClient(t *testing.T) {
