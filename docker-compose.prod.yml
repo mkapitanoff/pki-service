@@ -1,0 +1,106 @@
+services:
+
+  postgres:
+    image: postgres:15-alpine
+    container_name: pki_pg_prod
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-eds_prod}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    ports:
+      - "127.0.0.1:5432:5432"   # только localhost в prod
+    volumes:
+      - pg_prod_data:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB:-eds_prod}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: pki_redis_prod
+    command: redis-server --requirepass ${REDIS_PASSWORD}
+    ports:
+      - "127.0.0.1:6379:6379"
+    volumes:
+      - redis_prod_data:/data
+    restart: unless-stopped
+
+  rabbitmq:
+    image: rabbitmq:3.12-alpine
+    container_name: pki_rmq_prod
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD}
+    ports:
+      - "127.0.0.1:5672:5672"
+    volumes:
+      - rmq_prod_data:/var/lib/rabbitmq
+    restart: unless-stopped
+
+  ncanode:
+    image: malikzh/ncanode:latest
+    container_name: pki_ncanode_prod
+    environment:
+      NCANODE_DEBUG: "false"
+      NCANODE_OCSP_URL: "http://ocsp.pki.gov.kz/"
+      NCANODE_TSP_URL: "http://tsp.pki.gov.kz/"
+      NCANODE_CRL_URL: >
+        http://crl.pki.gov.kz/nca_rsa.crl
+        http://crl.pki.gov.kz/nca_gost.crl
+        http://crl.pki.gov.kz/nca_gost2022.crl
+      NCANODE_CA_URL: >
+        http://pki.gov.kz/cert/root_gost.cer
+        http://pki.gov.kz/cert/root_rsa.cer
+        http://pki.gov.kz/cert/root_gost_2022.cer
+        http://pki.gov.kz/cert/nca_gost.cer
+        http://pki.gov.kz/cert/nca_rsa.cer
+        http://pki.gov.kz/cert/nca_gost2022.cer
+    ports:
+      - "127.0.0.1:14579:14579"
+    restart: unless-stopped
+
+  api:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: pki_api_prod
+    environment:
+      APP_ENV: prod
+    env_file:
+      - ../.env.prod          # этот файл не в git, создаётся вручную на сервере
+    ports:
+      - "127.0.0.1:8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      rabbitmq:
+        condition: service_started
+      ncanode:
+        condition: service_started
+    restart: unless-stopped
+
+  worker:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.worker
+    container_name: pki_worker_prod
+    environment:
+      APP_ENV: prod
+    env_file:
+      - ../.env.prod
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_started
+    restart: unless-stopped
+
+volumes:
+  pg_prod_data:
+  redis_prod_data:
+  rmq_prod_data:

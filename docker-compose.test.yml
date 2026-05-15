@@ -1,0 +1,107 @@
+services:
+
+  postgres:
+    image: postgres:15-alpine
+    container_name: pki_pg_test
+    environment:
+      POSTGRES_DB: eds_test
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: pass
+    ports:
+      - "5432:5432"
+    volumes:
+      - pg_test_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U user -d eds_test"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: pki_redis_test
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  rabbitmq:
+    image: rabbitmq:3.12-management-alpine
+    container_name: pki_rmq_test
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+    ports:
+      - "5672:5672"    # AMQP
+      - "15672:15672"  # Management UI
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  minio:
+    image: minio/minio:latest
+    container_name: pki_minio_test
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    ports:
+      - "9000:9000"  # S3 API
+      - "9001:9001"  # Console UI
+    volumes:
+      - minio_test_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  minio-init:
+    image: minio/mc:latest
+    container_name: pki_minio_init
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+        mc alias set local http://minio:9000 minioadmin minioadmin;
+        mc mb --ignore-existing local/eds-test;
+        mc anonymous set none local/eds-test;
+        echo 'MinIO bucket eds-test created';
+      "
+    restart: "no"
+
+  ncanode:
+    image: malikzh/ncanode:latest
+    container_name: pki_ncanode_test
+    environment:
+      NCANODE_DEBUG: "true"
+      NCANODE_OCSP_URL: "http://test.pki.gov.kz/ocsp/"
+      NCANODE_TSP_URL: "http://test.pki.gov.kz/tsp/"
+      NCANODE_CRL_URL: >
+        http://test.pki.gov.kz/crl/nca_rsa_test.crl
+        http://test.pki.gov.kz/crl/nca_gost_test.crl
+        http://test.pki.gov.kz/crl/nca_gost2022_test.crl
+      NCANODE_CA_URL: >
+        http://test.pki.gov.kz/cert/root_gost_test.cer
+        http://test.pki.gov.kz/cert/root_rsa_test.cer
+        http://test.pki.gov.kz/cert/root_test_gost_2022.cer
+        http://test.pki.gov.kz/cert/nca_gost_test.cer
+        http://test.pki.gov.kz/cert/nca_rsa_test.cer
+        http://test.pki.gov.kz/cert/nca_gost2022_test.cer
+    ports:
+      - "14579:14579"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:14579/"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  pg_test_data:
+  minio_test_data:

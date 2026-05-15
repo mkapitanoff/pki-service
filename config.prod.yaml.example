@@ -1,0 +1,45 @@
+# ШАБЛОН для production конфига.
+# Скопируй в configs/config.prod.yaml и заполни реальными значениями.
+# configs/config.prod.yaml НЕ коммитится в git (см. .gitignore).
+
+app:
+  env: prod
+  port: 8080
+  verify_base_url: "https://sign.your-domain.kz"   # ← заменить
+
+database:
+  dsn: "postgres://PROD_USER:PROD_PASSWORD@localhost:5432/eds_prod?sslmode=require"
+  max_open_conns: 25
+  max_idle_conns: 10
+  conn_max_lifetime_sec: 300
+
+ncanode:
+  url: "http://localhost:14579"
+  timeout_sec: 30
+
+storage:
+  endpoint: ""          # пусто = AWS S3; или URL для S3-совместимого хранилища
+  region: "us-east-1"   # ← регион вашего S3
+  bucket: "eds-prod"    # ← заменить
+  access_key: ""        # ← из env: AWS_ACCESS_KEY_ID
+  secret_key: ""        # ← из env: AWS_SECRET_ACCESS_KEY
+  use_path_style: false
+
+redis:
+  addr: "localhost:6379"
+  password: "PROD_REDIS_PASSWORD"   # ← заменить
+  db: 0
+
+rabbitmq:
+  url: "amqp://PROD_USER:PROD_PASSWORD@localhost:5672/"   # ← заменить
+  webhook_queue: "webhook.delivery"
+  event_exchange: "eds.events"
+  prefetch_count: 10
+
+log:
+  level: "info"
+  format: "json"
+
+rate_limit:
+  verify_per_minute: 60
+  api_per_minute: 300
