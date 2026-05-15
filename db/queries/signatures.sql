@@ -38,3 +38,7 @@ WHERE id = $1 AND tenant_id = $2;
 SELECT * FROM signatures
 WHERE document_id = $1 AND tenant_id = $2
 ORDER BY sequence_num ASC;
+
+-- name: GetSignatureByIDPublic :one
+SELECT * FROM signatures
+WHERE id = $1;
