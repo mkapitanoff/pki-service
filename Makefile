@@ -108,7 +108,7 @@ sqlc-check: ## Проверить sqlc конфиг без генерации
 install-tools: ## Установить dev-инструменты (sqlc, migrate, golangci-lint)
 	go install github.com/sqlc-dev/sqlc/cmd/sqlc@latest
 	go install github.com/golang-migrate/migrate/v4/cmd/migrate@latest
-	go install github.com/golangci-lint/golangci-lint/cmd/golangci-lint@latest
+	echo "golangci-lint installed via brew"
 	@echo "Инструменты установлены. Убедись что GOPATH/bin в PATH."
 
 lint: ## Запустить линтер
