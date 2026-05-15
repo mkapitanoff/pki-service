@@ -1,4 +1,4 @@
-module github.com/your-org/pki-service
+module github.com/mkapitanoff/pki-service
 
 go 1.22
 
