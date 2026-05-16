@@ -17,6 +17,7 @@ type QRStamp struct {
 	SignerName string
 	Role       string
 	QRImagePNG []byte
+	PageCount  int
 }
 
 const (
@@ -27,15 +28,13 @@ const (
 
 // AddQRStamps overlays each stamp's QR (80×80pt) on the bottom-left of every
 // page, laid out left-to-right with a 10pt gap.
-// Under each QR the label "Проверить ЭЦП" is printed.
+// Under each QR the label "Proverit ECP" is printed (Latin, Helvetica-safe).
 func AddQRStamps(pdfBytes []byte, stamps []QRStamp) ([]byte, error) {
 	if len(stamps) == 0 {
 		cp := make([]byte, len(pdfBytes))
 		copy(cp, pdfBytes)
 		return cp, nil
 	}
-
-	ensureFont()
 
 	conf := model.NewDefaultConfiguration()
 
@@ -69,18 +68,12 @@ func AddQRStamps(pdfBytes []byte, stamps []QRStamp) ([]byte, error) {
 			return nil, fmt.Errorf("pdf: apply qr stamp: %w", err)
 		}
 
-		// --- "Проверить ЭЦП" label ---
-		label := "Proverit ECP" // Latin fallback (Helvetica)
-		fontName := "Helvetica"
-		if activeFontName == cyrillicFont {
-			label = "Проверить ЭЦП"
-			fontName = cyrillicFont
-		}
+		// --- "Proverit ECP" label (Latin only — Helvetica is Latin-1) ---
 		txtDesc := fmt.Sprintf(
-			"font:%s, points:6, scale:1 abs, pos:bl, off:%d %d, rot:0, fillc:#000000, opacity:1",
-			fontName, xOff, stampMargin,
+			"font:Helvetica, points:6, scale:1 abs, pos:bl, off:%d %d, rot:0, fillc:#000000, opacity:1",
+			xOff, stampMargin,
 		)
-		txtWM, err := pdfcpu.ParseTextWatermarkDetails(label, txtDesc, true, types.POINTS)
+		txtWM, err := pdfcpu.ParseTextWatermarkDetails("Proverit ECP", txtDesc, true, types.POINTS)
 		if err != nil {
 			return nil, fmt.Errorf("pdf: parse stamp label: %w", err)
 		}

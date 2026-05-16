@@ -4,52 +4,35 @@ import (
 	"bytes"
 	"fmt"
 	"io"
-	"os"
-	"sync"
+	"strings"
 	"time"
+	"unicode"
 
 	"github.com/pdfcpu/pdfcpu/pkg/api"
-	"github.com/pdfcpu/pdfcpu/pkg/font"
 	pdfcpu "github.com/pdfcpu/pdfcpu/pkg/pdfcpu"
 	"github.com/pdfcpu/pdfcpu/pkg/pdfcpu/model"
 	"github.com/pdfcpu/pdfcpu/pkg/pdfcpu/types"
 )
 
-const (
-	cyrillicFont = "ArialUnicodeMS"
-	fallbackFont = "Helvetica"
-)
-
-var (
-	fontOnce       sync.Once
-	activeFontName = fallbackFont
-)
-
-// ensureFont attempts to install Arial Unicode MS once per process.
-// Uses pdfcpu's platform-default font directory (e.g. ~/Library/Application Support/pdfcpu/fonts on macOS).
-// Falls back to Helvetica silently if the font file is not present.
-func ensureFont() {
-	fontOnce.Do(func() {
-		// Ensure the font directory exists (pdfcpu may not create it automatically).
-		if font.UserFontDir != "" {
-			_ = os.MkdirAll(font.UserFontDir, 0o755)
-		}
-
-		const ttfPath = "/Library/Fonts/Arial Unicode.ttf"
-		if _, err := os.Stat(ttfPath); err != nil {
-			return // font not installed on this machine
-		}
-		if err := api.InstallFonts([]string{ttfPath}); err != nil {
-			return
-		}
-		font.LoadUserFonts()
-		for _, n := range font.UserFontNames() {
-			if n == cyrillicFont {
-				activeFontName = cyrillicFont
-				return
-			}
-		}
-	})
+// SignatureInfo is one rendered entry on the "Лист подписей" page. Fields
+// mirror the format section in CLAUDE.md. Truncation/masking helpers below
+// produce the displayed values.
+type SignatureInfo struct {
+	SignerName    string
+	OrgName       string
+	BIN           string
+	IIN           string // raw IIN; rendered via MaskIIN
+	SignerType    string
+	Basis         string
+	CertSerial    string // raw serial; rendered via TruncateCertSerial
+	CertNotBefore time.Time
+	CertNotAfter  time.Time
+	CAName        string
+	SignFormat    string
+	SHA256Hash    string // raw hex; rendered via TruncateSHA256
+	Status        string
+	SignedAt      time.Time
+	QRImagePNG    []byte
 }
 
 // MaskIIN masks an IIN as first 4 + "****" + last 4 (e.g. 123456789012 ->
@@ -92,203 +75,143 @@ func formatDate(t time.Time) string {
 	return t.Format("02.01.2006")
 }
 
-func orDash(s string) string {
-	if s == "" {
-		return "-"
-	}
-	return s
+// cyrTranslit maps Cyrillic runes to Latin equivalents for PDF output.
+// pdfcpu standard fonts (Helvetica, Courier) are Latin-1 only.
+var cyrTranslit = map[rune]string{
+	'А': "A", 'а': "a", 'Б': "B", 'б': "b", 'В': "V", 'в': "v",
+	'Г': "G", 'г': "g", 'Д': "D", 'д': "d", 'Е': "E", 'е': "e",
+	'Ё': "YO", 'ё': "yo", 'Ж': "ZH", 'ж': "zh", 'З': "Z", 'з': "z",
+	'И': "I", 'и': "i", 'Й': "J", 'й': "j", 'К': "K", 'к': "k",
+	'Л': "L", 'л': "l", 'М': "M", 'м': "m", 'Н': "N", 'н': "n",
+	'О': "O", 'о': "o", 'П': "P", 'п': "p", 'Р': "R", 'р': "r",
+	'С': "S", 'с': "s", 'Т': "T", 'т': "t", 'У': "U", 'у': "u",
+	'Ф': "F", 'ф': "f", 'Х': "KH", 'х': "kh", 'Ц': "TS", 'ц': "ts",
+	'Ч': "CH", 'ч': "ch", 'Ш': "SH", 'ш': "sh", 'Щ': "SHCH", 'щ': "shch",
+	'Ъ': "", 'ъ': "", 'Ы': "Y", 'ы': "y", 'Ь': "", 'ь': "",
+	'Э': "E", 'э': "e", 'Ю': "YU", 'ю': "yu", 'Я': "YA", 'я': "ya",
+	// Kazakh specific
+	'Ә': "A", 'ә': "a", 'Ғ': "G", 'ғ': "g", 'Қ': "K", 'қ': "k",
+	'Ң': "N", 'ң': "n", 'Ө': "O", 'ө': "o", 'Ұ': "U", 'ұ': "u",
+	'Ү': "U", 'ү': "u", 'Һ': "H", 'һ': "h", 'І': "I", 'і': "i",
 }
 
-// blankPagesJSON returns a pdfcpu "create" JSON describing n A4 pages.
+// translit converts a string: replaces Cyrillic with Latin equivalents,
+// passes ASCII and other printable characters through unchanged.
+func translit(s string) string {
+	var b strings.Builder
+	for _, r := range s {
+		if lat, ok := cyrTranslit[r]; ok {
+			b.WriteString(lat)
+		} else if r > unicode.MaxASCII && !unicode.IsSpace(r) && !unicode.IsPunct(r) && !unicode.IsNumber(r) {
+			// unknown non-ASCII, non-space — skip to avoid PDF encoding issues
+		} else {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
+
+// blankPagesJSON returns a pdfcpu "create" JSON describing n A4 pages, each
+// carrying a single near-invisible space (pdfcpu requires page content).
 func blankPagesJSON(n int) string {
 	if n < 1 {
 		n = 1
 	}
-	s := `{"pages":{`
+	var b strings.Builder
+	b.WriteString(`{"pages":{`)
 	for i := 1; i <= n; i++ {
 		if i > 1 {
-			s += ","
+			b.WriteByte(',')
 		}
-		s += fmt.Sprintf(`"%d":{"content":{"text":[{"value":" ","pos":[40,40],"font":{"name":"Helvetica","size":1}}]}}`, i)
+		fmt.Fprintf(&b, `"%d":{"content":{"text":[{"value":" ","pos":[40,40],"font":{"name":"Helvetica","size":1}}]}}`, i)
 	}
-	s += `}}`
-	return s
+	b.WriteString(`}}`)
+	return b.String()
 }
 
-// SignatureInfo is one rendered entry on the "Лист подписей" page. Fields
-// mirror the format section in CLAUDE.md. Truncation/masking helpers below
-// produce the displayed values.
-type SignatureInfo struct {
-	SignerName    string
-	OrgName       string
-	BIN           string
-	IIN           string // raw IIN; rendered via MaskIIN
-	SignerType    string
-	Basis         string
-	CertSerial    string // raw serial; rendered via TruncateCertSerial
-	CertNotBefore time.Time
-	CertNotAfter  time.Time
-	CAName        string
-	SignFormat    string
-	SHA256Hash    string // raw hex; rendered via TruncateSHA256
-	Status        string
-	SignedAt      time.Time
-	QRImagePNG    []byte
-}
-
-// line is a text line to stamp on the page with a Y offset.
-type line struct {
-	text string
-	bold bool
-}
-
-// buildSignPageLines converts all signature infos into an ordered slice of
-// text lines following the CLAUDE.md reference format.
-func buildSignPageLines(sigs []SignatureInfo) []line {
-	var lines []line
-
-	add := func(text string, bold bool) {
-		lines = append(lines, line{text, bold})
-	}
-	sep := func() { add("", false) }
-
-	add("ЛИСТ ПОДПИСЕЙ", true)
-	add("Электронные цифровые подписи документа", false)
-	sep()
-
-	for i, s := range sigs {
+// signPageLines returns text lines for the sign page, all transliterated to Latin.
+func signPageLines(signatures []SignatureInfo) []string {
+	var lines []string
+	lines = append(lines, "LYST PODPISEJ / LIST OF SIGNATURES")
+	lines = append(lines, "")
+	for i, s := range signatures {
 		if i > 0 {
-			add("------------------------------------------------", false)
-			sep()
+			lines = append(lines, "------------------------------------------------")
+			lines = append(lines, "")
 		}
-		add(fmt.Sprintf("✓ ДОКУМЕНТ ПОДПИСАН ЭЦП (%d)", i+1), true)
-		add(fmt.Sprintf("Дата подписания:  %s", formatTS(s.SignedAt)), false)
+		lines = append(lines, fmt.Sprintf("DOKUMENT PODPISAN ECP (%d)", i+1))
+		lines = append(lines, fmt.Sprintf("Data podpisanija:  %s", formatTS(s.SignedAt)))
 		if s.OrgName != "" {
-			add(fmt.Sprintf("Организация:      %s", s.OrgName), false)
+			lines = append(lines, fmt.Sprintf("Organizacija:      %s", translit(s.OrgName)))
 		}
 		if s.BIN != "" {
-			add(fmt.Sprintf("БИН:              %s", s.BIN), false)
+			lines = append(lines, fmt.Sprintf("BIN:               %s", s.BIN))
 		}
-		add(fmt.Sprintf("Подписант:        %s", s.SignerName), false)
+		lines = append(lines, fmt.Sprintf("Podpisant:         %s", translit(s.SignerName)))
 		if s.IIN != "" {
-			add(fmt.Sprintf("ИИН:              %s", MaskIIN(s.IIN)), false)
+			lines = append(lines, fmt.Sprintf("IIN:               %s", MaskIIN(s.IIN)))
 		}
-		add(fmt.Sprintf("Тип:              %s", orDash(s.SignerType)), false)
+		lines = append(lines, fmt.Sprintf("Tip:               %s", translit(s.SignerType)))
 		if s.Basis != "" {
-			add(fmt.Sprintf("Основание:        %s", s.Basis), false)
+			lines = append(lines, fmt.Sprintf("Osnovanie:         %s", translit(s.Basis)))
 		}
-		sep()
-		add("СЕРТИФИКАТ", true)
-		add(fmt.Sprintf("УЦ:               %s", orDash(s.CAName)), false)
-		add(fmt.Sprintf("№ сертификата:    %s", TruncateCertSerial(s.CertSerial)), false)
-		add(fmt.Sprintf("Действителен:     с %s по %s", formatDate(s.CertNotBefore), formatDate(s.CertNotAfter)), false)
-		sep()
-		add("ПОДПИСЬ", true)
-		add(fmt.Sprintf("Формат:           %s", orDash(s.SignFormat)), false)
-		add(fmt.Sprintf("Хэш SHA-256:      %s", TruncateSHA256(s.SHA256Hash)), false)
-		add("Статус:           Подпись действительна ✓", false)
-		sep()
+		lines = append(lines, "")
+		lines = append(lines, "SERTIFIKAT / CERTIFICATE")
+		lines = append(lines, fmt.Sprintf("UC:                %s", translit(s.CAName)))
+		lines = append(lines, fmt.Sprintf("Nomer:             %s", TruncateCertSerial(s.CertSerial)))
+		lines = append(lines, fmt.Sprintf("Dejstvitelen:      %s - %s",
+			formatDate(s.CertNotBefore), formatDate(s.CertNotAfter)))
+		lines = append(lines, "")
+		lines = append(lines, "PODPIS / SIGNATURE")
+		lines = append(lines, fmt.Sprintf("Format:            %s", s.SignFormat))
+		lines = append(lines, fmt.Sprintf("SHA-256:           %s", TruncateSHA256(s.SHA256Hash)))
+		lines = append(lines, fmt.Sprintf("Status:            %s", translit(s.Status)))
 	}
-
 	return lines
 }
 
 // GenerateSignPage renders a single PDF page listing all signatures.
-// Text is stamped line-by-line via pdfcpu watermarks; QR images are placed
-// at the right margin alongside each signature block.
+// Each line is stamped as a separate watermark for reliable positioning.
+// All text is transliterated to Latin because pdfcpu built-in fonts are Latin-1 only.
 func GenerateSignPage(signatures []SignatureInfo) ([]byte, error) {
-	ensureFont()
-
 	conf := model.NewDefaultConfiguration()
 
-	// Create a blank A4 page.
-	blankJSON := `{"pages":{"1":{"mediaBox":[0,0,595,842],"content":{"text":[{"value":" ","pos":[40,40],"font":{"name":"Helvetica","size":1}}]}}}}`
 	var base bytes.Buffer
-	if err := api.Create(nil, bytes.NewReader([]byte(blankJSON)), &base, conf); err != nil {
+	if err := api.Create(nil, strings.NewReader(blankPagesJSON(1)), &base, conf); err != nil {
 		return nil, fmt.Errorf("pdf: create blank sign page: %w", err)
 	}
 
-	lines := buildSignPageLines(signatures)
+	lines := signPageLines(signatures)
 
 	const (
-		fontPt    = 9
-		lineH     = 14  // pt between lines
-		topMargin = 800 // pt from bottom of A4 (842pt tall)
+		fontPt     = 9
+		lineH      = 13 // pt between lines
+		topMargin  = 45
 		leftMargin = 40
 	)
 
-	fn := activeFontName
 	cur := base.Bytes()
-
-	for i, l := range lines {
-		if l.text == "" {
+	lineIdx := 0
+	for _, line := range lines {
+		if strings.TrimSpace(line) == "" {
+			lineIdx++
 			continue
 		}
-		yFromBottom := topMargin - i*lineH
-		if yFromBottom < 20 {
-			break // off page
-		}
-
-		pts := fontPt
-		if l.bold {
-			pts = fontPt + 1
-		}
+		yOff := topMargin + lineIdx*lineH
 		desc := fmt.Sprintf(
-			"font:%s, points:%d, scale:1 abs, pos:bl, off:%d %d, rot:0, fillc:#000000, opacity:1",
-			fn, pts, leftMargin, yFromBottom,
+			"font:Courier, points:%d, scale:1 abs, pos:tl, off:%d -%d, rot:0, fillc:#000000, opacity:1",
+			fontPt, leftMargin, yOff,
 		)
-		wm, err := pdfcpu.ParseTextWatermarkDetails(l.text, desc, true, types.POINTS)
+		wm, err := pdfcpu.ParseTextWatermarkDetails(line, desc, true, types.POINTS)
 		if err != nil {
-			return nil, fmt.Errorf("pdf: parse sign-page line %d: %w", i, err)
+			return nil, fmt.Errorf("pdf: parse sign-page line: %w", err)
 		}
 		var out bytes.Buffer
 		if err := api.AddWatermarks(bytes.NewReader(cur), &out, nil, wm, conf); err != nil {
-			return nil, fmt.Errorf("pdf: stamp sign-page line %d: %w", i, err)
+			return nil, fmt.Errorf("pdf: stamp sign-page line: %w", err)
 		}
 		cur = out.Bytes()
-	}
-
-	// Overlay QR images at the right margin, one per signature.
-	// Each QR is placed at the same vertical position as its block header.
-	// Block header for sig i is at line offset: 3 (header) + i*(linesPerBlock).
-	// We estimate ~12 lines per signature block; place QR near the top of each.
-	const (
-		qrSize     = 80 // pt
-		qrRightOff = 520
-		linesPerSig = 12
-	)
-	tmpDir, err := os.MkdirTemp("", "signpage-")
-	if err != nil {
-		return nil, fmt.Errorf("pdf: temp dir: %w", err)
-	}
-	defer os.RemoveAll(tmpDir)
-
-	for i, s := range signatures {
-		if len(s.QRImagePNG) == 0 {
-			continue
-		}
-		imgPath := fmt.Sprintf("%s/qr-%d.png", tmpDir, i)
-		if err := os.WriteFile(imgPath, s.QRImagePNG, 0o600); err != nil {
-			return nil, fmt.Errorf("pdf: write qr: %w", err)
-		}
-		// Y position aligns with the signature block header.
-		yFromBottom := topMargin - (3+i*(linesPerSig+1))*lineH
-		if yFromBottom < qrSize+20 {
-			yFromBottom = qrSize + 20
-		}
-		imgDesc := fmt.Sprintf(
-			"pos:bl, off:%d %d, scale:%d abs, rot:0, opacity:1",
-			qrRightOff, yFromBottom-qrSize, qrSize,
-		)
-		imgWM, err := pdfcpu.ParseImageWatermarkDetails(imgPath, imgDesc, true, types.POINTS)
-		if err != nil {
-			return nil, fmt.Errorf("pdf: parse qr wm: %w", err)
-		}
-		var out bytes.Buffer
-		if err := api.AddWatermarks(bytes.NewReader(cur), &out, nil, imgWM, conf); err != nil {
-			return nil, fmt.Errorf("pdf: apply qr wm: %w", err)
-		}
-		cur = out.Bytes()
+		lineIdx++
 	}
 
 	return cur, nil
