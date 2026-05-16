@@ -69,8 +69,25 @@ func main() {
 	signSvc := service.NewSignService(db, ncClient, store, queries, nil, cfg.App.VerifyBaseURL)
 	signHandler := handler.NewSignHandler(signSvc, queries)
 	verifyHandler := handler.NewVerifyHandler(queries)
+	demoHandler := handler.NewDemoHandler(queries, store)
+	documentHandler := handler.NewDocumentHandler(queries, store, cfg.App.VerifyBaseURL)
 
 	r := chi.NewRouter()
+
+	// CORS — must be first, before all other middleware and routes.
+	r.Use(func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Access-Control-Allow-Origin", "http://localhost:3000")
+			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+			if r.Method == http.MethodOptions {
+				w.WriteHeader(http.StatusNoContent)
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	})
+
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.RequestID)
@@ -85,6 +102,10 @@ func main() {
 		pub.Get("/verify/{signature_id}", verifyHandler.HandleVerify)
 	})
 
+	// Demo routes — no auth, for frontend testing only.
+	r.Post("/api/demo/upload", demoHandler.HandleUpload)
+	r.Get("/api/demo/download/{id}", demoHandler.HandleDownload)
+
 	r.Route("/api/v1", func(api chi.Router) {
 		api.Use(handler.APIKeyAuth(queries))
 		api.Use(handler.RateLimiter(cfg.RateLimit.APIPerMinute))
@@ -92,6 +113,10 @@ func main() {
 		api.Post("/documents", signHandler.HandleCreateDocument)
 		api.Get("/documents/{id}", signHandler.HandleGetDocument)
 		api.Post("/documents/{id}/sign", signHandler.HandleSign)
+
+		// Production upload/download — paths avoid {id} wildcard conflict.
+		api.Post("/upload", documentHandler.HandleUploadDocument)
+		api.Get("/documents/{id}/file", documentHandler.HandleDownloadDocument)
 	})
 
 	srv := &http.Server{
