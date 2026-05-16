@@ -30,13 +30,13 @@ func TestAddQRStamps_AppliesToEveryPage(t *testing.T) {
 	require.NoError(t, err)
 
 	stamps := []QRStamp{
-		{SignerName: "ТЕСТОВ ТЕСТ", Role: "client", QRImagePNG: png, PageCount: 2},
-		{SignerName: "ИВАНОВ ИВАН", Role: "factor", QRImagePNG: png, PageCount: 2},
+		{SignerName: "ТЕСТОВ ТЕСТ", Role: "client", QRImagePNG: png},
+		{SignerName: "ИВАНОВ ИВАН", Role: "factor", QRImagePNG: png},
 	}
 
 	out, err := AddQRStamps(base.Bytes(), stamps)
 	require.NoError(t, err)
-	require.True(t, bytes.HasPrefix(out, []byte("%PDF-")))
+	require.True(t, bytes.Equal(out[:5], []byte("%PDF-")))
 
 	n, err := api.PageCount(bytes.NewReader(out), conf)
 	require.NoError(t, err)
