@@ -4,11 +4,13 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"os"
 	"strings"
+	"sync"
 	"time"
-	"unicode"
 
 	"github.com/pdfcpu/pdfcpu/pkg/api"
+	"github.com/pdfcpu/pdfcpu/pkg/font"
 	pdfcpu "github.com/pdfcpu/pdfcpu/pkg/pdfcpu"
 	"github.com/pdfcpu/pdfcpu/pkg/pdfcpu/model"
 	"github.com/pdfcpu/pdfcpu/pkg/pdfcpu/types"
@@ -75,40 +77,73 @@ func formatDate(t time.Time) string {
 	return t.Format("02.01.2006")
 }
 
-// cyrTranslit maps Cyrillic runes to Latin equivalents for PDF output.
-// pdfcpu standard fonts (Helvetica, Courier) are Latin-1 only.
-var cyrTranslit = map[rune]string{
-	'А': "A", 'а': "a", 'Б': "B", 'б': "b", 'В': "V", 'в': "v",
-	'Г': "G", 'г': "g", 'Д': "D", 'д': "d", 'Е': "E", 'е': "e",
-	'Ё': "YO", 'ё': "yo", 'Ж': "ZH", 'ж': "zh", 'З': "Z", 'з': "z",
-	'И': "I", 'и': "i", 'Й': "J", 'й': "j", 'К': "K", 'к': "k",
-	'Л': "L", 'л': "l", 'М': "M", 'м': "m", 'Н': "N", 'н': "n",
-	'О': "O", 'о': "o", 'П': "P", 'п': "p", 'Р': "R", 'р': "r",
-	'С': "S", 'с': "s", 'Т': "T", 'т': "t", 'У': "U", 'у': "u",
-	'Ф': "F", 'ф': "f", 'Х': "KH", 'х': "kh", 'Ц': "TS", 'ц': "ts",
-	'Ч': "CH", 'ч': "ch", 'Ш': "SH", 'ш': "sh", 'Щ': "SHCH", 'щ': "shch",
-	'Ъ': "", 'ъ': "", 'Ы': "Y", 'ы': "y", 'Ь': "", 'ь': "",
-	'Э': "E", 'э': "e", 'Ю': "YU", 'ю': "yu", 'Я': "YA", 'я': "ya",
-	// Kazakh specific
-	'Ә': "A", 'ә': "a", 'Ғ': "G", 'ғ': "g", 'Қ': "K", 'қ': "k",
-	'Ң': "N", 'ң': "n", 'Ө': "O", 'ө': "o", 'Ұ': "U", 'ұ': "u",
-	'Ү': "U", 'ү': "u", 'Һ': "H", 'һ': "h", 'І': "I", 'і': "i",
+// candidateFonts lists TTF paths to try, in priority order.
+// First match that exists will be installed into pdfcpu's user font dir.
+var candidateFonts = []string{
+	// macOS
+	"/Library/Fonts/Arial Unicode.ttf",
+	// Linux — DejaVu (apt: fonts-dejavu-core / apk: font-dejavu)
+	"/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+	"/usr/share/fonts/dejavu/DejaVuSans.ttf",
+	"/usr/share/fonts/TTF/DejaVuSans.ttf",
+	// Linux — FreeSans (apt: fonts-freefont-ttf)
+	"/usr/share/fonts/truetype/freefont/FreeSans.ttf",
+	// Linux — Noto (apt: fonts-noto-core)
+	"/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",
+	"/usr/share/fonts/noto/NotoSans-Regular.ttf",
 }
 
-// translit converts a string: replaces Cyrillic with Latin equivalents,
-// passes ASCII and other printable characters through unchanged.
-func translit(s string) string {
-	var b strings.Builder
-	for _, r := range s {
-		if lat, ok := cyrTranslit[r]; ok {
-			b.WriteString(lat)
-		} else if r > unicode.MaxASCII && !unicode.IsSpace(r) && !unicode.IsPunct(r) && !unicode.IsNumber(r) {
-			// unknown non-ASCII, non-space — skip to avoid PDF encoding issues
-		} else {
-			b.WriteRune(r)
-		}
+var (
+	fontOnce       sync.Once
+	activeFontName = "Courier" // fallback — Latin only
+)
+
+// pdfcpuFontDir returns the platform-appropriate user font directory for pdfcpu.
+// pdfcpu does not initialise font.UserFontDir automatically on all platforms;
+// we derive it from $HOME to match pdfcpu's own convention.
+func pdfcpuFontDir() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
 	}
-	return b.String()
+	// pdfcpu uses ~/Library/Application Support/pdfcpu on macOS,
+	// ~/.local/share/pdfcpu on Linux (XDG convention).
+	if _, err := os.Stat("/Library"); err == nil {
+		return home + "/Library/Application Support/pdfcpu/fonts"
+	}
+	return home + "/.local/share/pdfcpu/fonts"
+}
+
+// ensureFont tries to install the first available Cyrillic-capable TTF
+// into pdfcpu's user font directory. Runs once per process.
+func ensureFont() {
+	fontOnce.Do(func() {
+		// font.UserFontDir may be empty; resolve it explicitly.
+		dir := font.UserFontDir
+		if dir == "" {
+			dir = pdfcpuFontDir()
+			font.UserFontDir = dir
+		}
+		if dir != "" {
+			_ = os.MkdirAll(dir, 0o755)
+		}
+
+		for _, path := range candidateFonts {
+			if _, err := os.Stat(path); err != nil {
+				continue
+			}
+			if err := api.InstallFonts([]string{path}); err != nil {
+				continue
+			}
+			font.LoadUserFonts()
+			names := font.UserFontNames()
+			if len(names) > 0 {
+				activeFontName = names[0]
+				return
+			}
+		}
+		// No font found — activeFontName stays "Courier" (Latin-only fallback).
+	})
 }
 
 // blankPagesJSON returns a pdfcpu "create" JSON describing n A4 pages, each
@@ -129,51 +164,55 @@ func blankPagesJSON(n int) string {
 	return b.String()
 }
 
-// signPageLines returns text lines for the sign page, all transliterated to Latin.
+// signPageLines returns text lines for the sign page in Russian (кириллица).
 func signPageLines(signatures []SignatureInfo) []string {
 	var lines []string
-	lines = append(lines, "LYST PODPISEJ / LIST OF SIGNATURES")
+	lines = append(lines, "ЛИСТ ПОДПИСЕЙ")
 	lines = append(lines, "")
 	for i, s := range signatures {
 		if i > 0 {
 			lines = append(lines, "------------------------------------------------")
 			lines = append(lines, "")
 		}
-		lines = append(lines, fmt.Sprintf("DOKUMENT PODPISAN ECP (%d)", i+1))
-		lines = append(lines, fmt.Sprintf("Data podpisanija:  %s", formatTS(s.SignedAt)))
+		lines = append(lines, fmt.Sprintf("ДОКУМЕНТ ПОДПИСАН ЭЦП (%d)", i+1))
+		lines = append(lines, fmt.Sprintf("Дата подписания:  %s", formatTS(s.SignedAt)))
 		if s.OrgName != "" {
-			lines = append(lines, fmt.Sprintf("Organizacija:      %s", translit(s.OrgName)))
+			lines = append(lines, fmt.Sprintf("Организация:      %s", s.OrgName))
 		}
 		if s.BIN != "" {
-			lines = append(lines, fmt.Sprintf("BIN:               %s", s.BIN))
+			lines = append(lines, fmt.Sprintf("БИН:              %s", s.BIN))
 		}
-		lines = append(lines, fmt.Sprintf("Podpisant:         %s", translit(s.SignerName)))
+		lines = append(lines, fmt.Sprintf("Подписант:        %s", s.SignerName))
 		if s.IIN != "" {
-			lines = append(lines, fmt.Sprintf("IIN:               %s", MaskIIN(s.IIN)))
+			lines = append(lines, fmt.Sprintf("ИИН:              %s", MaskIIN(s.IIN)))
 		}
-		lines = append(lines, fmt.Sprintf("Tip:               %s", translit(s.SignerType)))
+		lines = append(lines, fmt.Sprintf("Тип:              %s", s.SignerType))
 		if s.Basis != "" {
-			lines = append(lines, fmt.Sprintf("Osnovanie:         %s", translit(s.Basis)))
+			lines = append(lines, fmt.Sprintf("Основание:        %s", s.Basis))
 		}
 		lines = append(lines, "")
-		lines = append(lines, "SERTIFIKAT / CERTIFICATE")
-		lines = append(lines, fmt.Sprintf("UC:                %s", translit(s.CAName)))
-		lines = append(lines, fmt.Sprintf("Nomer:             %s", TruncateCertSerial(s.CertSerial)))
-		lines = append(lines, fmt.Sprintf("Dejstvitelen:      %s - %s",
+		lines = append(lines, "СЕРТИФИКАТ")
+		lines = append(lines, fmt.Sprintf("УЦ:               %s", s.CAName))
+		lines = append(lines, fmt.Sprintf("№ сертификата:    %s", TruncateCertSerial(s.CertSerial)))
+		lines = append(lines, fmt.Sprintf("Действителен:     с %s по %s",
 			formatDate(s.CertNotBefore), formatDate(s.CertNotAfter)))
 		lines = append(lines, "")
-		lines = append(lines, "PODPIS / SIGNATURE")
-		lines = append(lines, fmt.Sprintf("Format:            %s", s.SignFormat))
-		lines = append(lines, fmt.Sprintf("SHA-256:           %s", TruncateSHA256(s.SHA256Hash)))
-		lines = append(lines, fmt.Sprintf("Status:            %s", translit(s.Status)))
+		lines = append(lines, "ПОДПИСЬ")
+		lines = append(lines, fmt.Sprintf("Формат:           %s", s.SignFormat))
+		lines = append(lines, fmt.Sprintf("Хэш SHA-256:      %s", TruncateSHA256(s.SHA256Hash)))
+		lines = append(lines, fmt.Sprintf("Статус:           %s", s.Status))
+		lines = append(lines, "")
 	}
 	return lines
 }
 
 // GenerateSignPage renders a single PDF page listing all signatures.
 // Each line is stamped as a separate watermark for reliable positioning.
-// All text is transliterated to Latin because pdfcpu built-in fonts are Latin-1 only.
+// Requires a Cyrillic-capable TTF font to be available on the host
+// (see candidateFonts). Falls back to Courier (Latin only) if none found.
 func GenerateSignPage(signatures []SignatureInfo) ([]byte, error) {
+	ensureFont()
+
 	conf := model.NewDefaultConfiguration()
 
 	var base bytes.Buffer
@@ -199,8 +238,8 @@ func GenerateSignPage(signatures []SignatureInfo) ([]byte, error) {
 		}
 		yOff := topMargin + lineIdx*lineH
 		desc := fmt.Sprintf(
-			"font:Courier, points:%d, scale:1 abs, pos:tl, off:%d -%d, rot:0, fillc:#000000, opacity:1",
-			fontPt, leftMargin, yOff,
+			"font:%s, points:%d, scale:1 abs, pos:tl, off:%d -%d, rot:0, fillc:#000000, opacity:1",
+			activeFontName, fontPt, leftMargin, yOff,
 		)
 		wm, err := pdfcpu.ParseTextWatermarkDetails(line, desc, true, types.POINTS)
 		if err != nil {

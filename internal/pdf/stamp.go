@@ -28,13 +28,15 @@ const (
 
 // AddQRStamps overlays each stamp's QR (80×80pt) on the bottom-left of every
 // page, laid out left-to-right with a 10pt gap.
-// Under each QR the label "Proverit ECP" is printed (Latin, Helvetica-safe).
+// Under each QR the label "Проверить ЭЦП" is printed (uses activeFontName).
 func AddQRStamps(pdfBytes []byte, stamps []QRStamp) ([]byte, error) {
 	if len(stamps) == 0 {
 		cp := make([]byte, len(pdfBytes))
 		copy(cp, pdfBytes)
 		return cp, nil
 	}
+
+	ensureFont()
 
 	conf := model.NewDefaultConfiguration()
 
@@ -46,6 +48,12 @@ func AddQRStamps(pdfBytes []byte, stamps []QRStamp) ([]byte, error) {
 
 	cur := make([]byte, len(pdfBytes))
 	copy(cur, pdfBytes)
+
+	// Use Cyrillic label if a Unicode font was loaded, otherwise Latin fallback.
+	label := "Proverit ECP"
+	if activeFontName != "Courier" {
+		label = "Проверить ЭЦП"
+	}
 
 	for i, st := range stamps {
 		xOff := stampMargin + i*(stampSizePt+stampGapPt)
@@ -68,12 +76,12 @@ func AddQRStamps(pdfBytes []byte, stamps []QRStamp) ([]byte, error) {
 			return nil, fmt.Errorf("pdf: apply qr stamp: %w", err)
 		}
 
-		// --- "Proverit ECP" label (Latin only — Helvetica is Latin-1) ---
+		// --- Label under QR ---
 		txtDesc := fmt.Sprintf(
-			"font:Helvetica, points:6, scale:1 abs, pos:bl, off:%d %d, rot:0, fillc:#000000, opacity:1",
-			xOff, stampMargin,
+			"font:%s, points:6, scale:1 abs, pos:bl, off:%d %d, rot:0, fillc:#000000, opacity:1",
+			activeFontName, xOff, stampMargin,
 		)
-		txtWM, err := pdfcpu.ParseTextWatermarkDetails("Proverit ECP", txtDesc, true, types.POINTS)
+		txtWM, err := pdfcpu.ParseTextWatermarkDetails(label, txtDesc, true, types.POINTS)
 		if err != nil {
 			return nil, fmt.Errorf("pdf: parse stamp label: %w", err)
 		}
