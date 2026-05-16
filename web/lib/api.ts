@@ -66,6 +66,8 @@ export type SignResult = {
 
 export type DemoUploadResult = {
   document_id: string;
+  title: string;
+  sha256_hash: string;
   status: string;
 };
 
@@ -104,8 +106,8 @@ export async function signDocument(
   return handleResponse(res);
 }
 
-// Demo upload: POST multipart form to /api/demo/upload
-// Backend stores the PDF in S3 and returns {document_id, status}.
+// Upload: POST multipart form to /api/v1/upload (requires API key auth).
+// Backend stores the PDF in S3 and returns {document_id, title, sha256_hash, status}.
 export async function demoUpload(
   file: File,
   title: string
@@ -113,8 +115,9 @@ export async function demoUpload(
   const form = new FormData();
   form.append("file", file);
   form.append("title", title);
-  const res = await fetch(`${API_BASE}/api/demo/upload`, {
+  const res = await fetch(`${API_BASE}/api/v1/upload`, {
     method: "POST",
+    headers: { Authorization: `Bearer ${API_KEY}` },
     body: form,
   });
   return handleResponse(res);
