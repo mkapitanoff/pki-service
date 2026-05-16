@@ -62,44 +62,16 @@ func TruncateSHA256(hash string) string {
 
 func formatTS(t time.Time) string {
 	if t.IsZero() {
-		return "—"
+		return "-"
 	}
 	return t.Format("02.01.2006, 15:04:05")
 }
 
 func formatDate(t time.Time) string {
 	if t.IsZero() {
-		return "—"
+		return "-"
 	}
 	return t.Format("02.01.2006")
-}
-
-func renderSignatureBlock(s SignatureInfo, idx int) string {
-	var b strings.Builder
-	fmt.Fprintf(&b, "✓ ДОКУМЕНТ ПОДПИСАН ЭЦП  (%d)\n", idx)
-	fmt.Fprintf(&b, "Дата подписания:  %s\n", formatTS(s.SignedAt))
-	if s.OrgName != "" {
-		fmt.Fprintf(&b, "Организация:      %s\n", s.OrgName)
-	}
-	if s.BIN != "" {
-		fmt.Fprintf(&b, "БИН:              %s\n", s.BIN)
-	}
-	fmt.Fprintf(&b, "Подписант:        %s\n", s.SignerName)
-	fmt.Fprintf(&b, "ИИН:              %s\n", MaskIIN(s.IIN))
-	fmt.Fprintf(&b, "Тип:              %s\n", s.SignerType)
-	if s.Basis != "" {
-		fmt.Fprintf(&b, "Основание:        %s\n", s.Basis)
-	}
-	b.WriteString("\nСЕРТИФИКАТ\n")
-	fmt.Fprintf(&b, "УЦ:               %s\n", s.CAName)
-	fmt.Fprintf(&b, "№ сертификата:    %s\n", TruncateCertSerial(s.CertSerial))
-	fmt.Fprintf(&b, "Действителен:     с %s по %s\n",
-		formatDate(s.CertNotBefore), formatDate(s.CertNotAfter))
-	b.WriteString("\nПОДПИСЬ\n")
-	fmt.Fprintf(&b, "Формат:           %s\n", s.SignFormat)
-	fmt.Fprintf(&b, "Хэш SHA-256:      %s\n", TruncateSHA256(s.SHA256Hash))
-	fmt.Fprintf(&b, "Статус:           %s\n", s.Status)
-	return b.String()
 }
 
 // blankPagesJSON returns a pdfcpu "create" JSON describing n A4 pages, each
@@ -120,8 +92,49 @@ func blankPagesJSON(n int) string {
 	return b.String()
 }
 
-// GenerateSignPage renders a single PDF page listing all signatures in the
-// CLAUDE.md "Лист подписей" format.
+// buildSignPageLines converts all signature infos into an ordered slice of
+// text lines that will be rendered top-to-bottom on the sign page.
+func buildSignPageLines(signatures []SignatureInfo) []string {
+	var lines []string
+	lines = append(lines, "LИСТ PODPISEJ / ЛИСТ ПОДПИСЕЙ")
+	lines = append(lines, "")
+	for i, s := range signatures {
+		if i > 0 {
+			lines = append(lines, "------------------------------------------------")
+			lines = append(lines, "")
+		}
+		lines = append(lines, fmt.Sprintf("DOKUMENT PODPISAN ECP (%d)", i+1))
+		lines = append(lines, fmt.Sprintf("Data podpisanija:  %s", formatTS(s.SignedAt)))
+		if s.OrgName != "" {
+			lines = append(lines, fmt.Sprintf("Organizacija:      %s", s.OrgName))
+		}
+		if s.BIN != "" {
+			lines = append(lines, fmt.Sprintf("BIN:               %s", s.BIN))
+		}
+		lines = append(lines, fmt.Sprintf("Podpisant:         %s", s.SignerName))
+		if s.IIN != "" {
+			lines = append(lines, fmt.Sprintf("IIN:               %s", MaskIIN(s.IIN)))
+		}
+		lines = append(lines, fmt.Sprintf("Tip:               %s", s.SignerType))
+		if s.Basis != "" {
+			lines = append(lines, fmt.Sprintf("Osnovanie:         %s", s.Basis))
+		}
+		lines = append(lines, "")
+		lines = append(lines, "SERTIFIKAT / СЕРТИФИКАТ")
+		lines = append(lines, fmt.Sprintf("UC:                %s", s.CAName))
+		lines = append(lines, fmt.Sprintf("Nomer:             %s", TruncateCertSerial(s.CertSerial)))
+		lines = append(lines, fmt.Sprintf("Dejstvitelen:      %s - %s", formatDate(s.CertNotBefore), formatDate(s.CertNotAfter)))
+		lines = append(lines, "")
+		lines = append(lines, "PODPIS / ПОДПИСЬ")
+		lines = append(lines, fmt.Sprintf("Format:            %s", s.SignFormat))
+		lines = append(lines, fmt.Sprintf("SHA-256:           %s", TruncateSHA256(s.SHA256Hash)))
+		lines = append(lines, fmt.Sprintf("Status:            %s", s.Status))
+	}
+	return lines
+}
+
+// GenerateSignPage renders a single PDF page listing all signatures.
+// Each line is stamped as a separate watermark for reliable positioning.
 func GenerateSignPage(signatures []SignatureInfo) ([]byte, error) {
 	conf := model.NewDefaultConfiguration()
 
@@ -130,33 +143,41 @@ func GenerateSignPage(signatures []SignatureInfo) ([]byte, error) {
 		return nil, fmt.Errorf("pdf: create blank sign page: %w", err)
 	}
 
-	var text strings.Builder
-	text.WriteString("ЛИСТ ПОДПИСЕЙ\n\n")
-	if len(signatures) == 0 {
-		text.WriteString("Подписи отсутствуют\n")
-	}
-	for i, s := range signatures {
-		if i > 0 {
-			text.WriteString("\n------------------------------\n\n")
-		}
-		text.WriteString(renderSignatureBlock(s, i+1))
-	}
+	lines := buildSignPageLines(signatures)
 
-	wm, err := pdfcpu.ParseTextWatermarkDetails(
-		text.String(),
-		"font:Courier, points:8, scale:0.9 abs, pos:tl, off:40 -40, rot:0, fillc:#000000, opacity:1",
-		true,
-		types.POINTS,
+	const (
+		fontPt     = 9
+		lineH      = 13 // pt between lines
+		topMargin  = 45
+		leftMargin = 40
 	)
-	if err != nil {
-		return nil, fmt.Errorf("pdf: parse sign-page text: %w", err)
+
+	cur := base.Bytes()
+	lineIdx := 0
+	for _, line := range lines {
+		if strings.TrimSpace(line) == "" {
+			// empty line still advances the cursor
+			lineIdx++
+			continue
+		}
+		yOff := topMargin + lineIdx*lineH
+		desc := fmt.Sprintf(
+			"font:Courier, points:%d, scale:1 abs, pos:tl, off:%d -%d, rot:0, fillc:#000000, opacity:1",
+			fontPt, leftMargin, yOff,
+		)
+		wm, err := pdfcpu.ParseTextWatermarkDetails(line, desc, true, types.POINTS)
+		if err != nil {
+			return nil, fmt.Errorf("pdf: parse sign-page line: %w", err)
+		}
+		var out bytes.Buffer
+		if err := api.AddWatermarks(bytes.NewReader(cur), &out, nil, wm, conf); err != nil {
+			return nil, fmt.Errorf("pdf: stamp sign-page line: %w", err)
+		}
+		cur = out.Bytes()
+		lineIdx++
 	}
 
-	var out bytes.Buffer
-	if err := api.AddWatermarks(bytes.NewReader(base.Bytes()), &out, nil, wm, conf); err != nil {
-		return nil, fmt.Errorf("pdf: stamp sign-page text: %w", err)
-	}
-	return out.Bytes(), nil
+	return cur, nil
 }
 
 // ReplaceLastPage drops the last page of pdfBytes and appends newPageBytes

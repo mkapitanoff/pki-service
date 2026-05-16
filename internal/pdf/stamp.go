@@ -71,9 +71,6 @@ func AddQRStamps(pdfBytes []byte, stamps []QRStamp) ([]byte, error) {
 		}
 
 		label := st.SignerName
-		if st.Role != "" {
-			label = st.SignerName + " (" + st.Role + ")"
-		}
 		txtDesc := fmt.Sprintf(
 			"font:Helvetica, points:6, scale:1 abs, pos:bl, off:%d %d, rot:0, fillc:#000000, opacity:1",
 			xOff, stampMargin,
