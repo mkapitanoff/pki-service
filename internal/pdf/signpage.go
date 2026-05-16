@@ -17,8 +17,7 @@ import (
 )
 
 // SignatureInfo is one rendered entry on the "Лист подписей" page. Fields
-// mirror the format section in CLAUDE.md. Truncation/masking helpers below
-// produce the displayed values.
+// mirror the format section in CLAUDE.md.
 type SignatureInfo struct {
 	SignerName    string
 	OrgName       string
@@ -37,8 +36,7 @@ type SignatureInfo struct {
 	QRImagePNG    []byte
 }
 
-// MaskIIN masks an IIN as first 4 + "****" + last 4 (e.g. 123456789012 ->
-// 1234****9012). Strings shorter than 8 chars are returned unchanged.
+// MaskIIN masks an IIN: first 4 + "****" + last 4.
 func MaskIIN(iin string) string {
 	if len(iin) < 8 {
 		return iin
@@ -46,8 +44,7 @@ func MaskIIN(iin string) string {
 	return iin[:4] + "****" + iin[len(iin)-4:]
 }
 
-// TruncateCertSerial renders a certificate serial as first 4 + "..." + last 3,
-// per the CLAUDE.md format section (example: 2F:5...3:91).
+// TruncateCertSerial: first 4 + "..." + last 3.
 func TruncateCertSerial(serial string) string {
 	if len(serial) <= 7 {
 		return serial
@@ -55,7 +52,7 @@ func TruncateCertSerial(serial string) string {
 	return serial[:4] + "..." + serial[len(serial)-3:]
 }
 
-// TruncateSHA256 renders a hash as first 8 + "..." + last 8.
+// TruncateSHA256: first 8 + "..." + last 8.
 func TruncateSHA256(hash string) string {
 	if len(hash) <= 16 {
 		return hash
@@ -77,48 +74,39 @@ func formatDate(t time.Time) string {
 	return t.Format("02.01.2006")
 }
 
-// candidateFonts lists TTF paths to try, in priority order.
-// First match that exists will be installed into pdfcpu's user font dir.
+// ── Font management ──────────────────────────────────────────────────────────
+
+// candidateFonts: TTF paths tried in order; first existing file is installed.
 var candidateFonts = []string{
-	// macOS
-	"/Library/Fonts/Arial Unicode.ttf",
-	// Linux — DejaVu (apt: fonts-dejavu-core / apk: font-dejavu)
-	"/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-	"/usr/share/fonts/dejavu/DejaVuSans.ttf",
-	"/usr/share/fonts/TTF/DejaVuSans.ttf",
-	// Linux — FreeSans (apt: fonts-freefont-ttf)
-	"/usr/share/fonts/truetype/freefont/FreeSans.ttf",
-	// Linux — Noto (apt: fonts-noto-core)
-	"/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",
+	"/Library/Fonts/Arial Unicode.ttf",                           // macOS
+	"/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",           // Ubuntu/Debian
+	"/usr/share/fonts/dejavu/DejaVuSans.ttf",                    // Fedora
+	"/usr/share/fonts/TTF/DejaVuSans.ttf",                       // Arch
+	"/usr/share/fonts/truetype/freefont/FreeSans.ttf",           // freefont
+	"/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",       // Noto
 	"/usr/share/fonts/noto/NotoSans-Regular.ttf",
 }
 
 var (
 	fontOnce       sync.Once
-	activeFontName = "Courier" // fallback — Latin only
+	activeFontName = "Courier" // Latin-only fallback
 )
 
-// pdfcpuFontDir returns the platform-appropriate user font directory for pdfcpu.
-// pdfcpu does not initialise font.UserFontDir automatically on all platforms;
-// we derive it from $HOME to match pdfcpu's own convention.
 func pdfcpuFontDir() string {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return ""
 	}
-	// pdfcpu uses ~/Library/Application Support/pdfcpu on macOS,
-	// ~/.local/share/pdfcpu on Linux (XDG convention).
 	if _, err := os.Stat("/Library"); err == nil {
 		return home + "/Library/Application Support/pdfcpu/fonts"
 	}
 	return home + "/.local/share/pdfcpu/fonts"
 }
 
-// ensureFont tries to install the first available Cyrillic-capable TTF
-// into pdfcpu's user font directory. Runs once per process.
+// ensureFont installs the first available Cyrillic TTF into pdfcpu's font
+// cache. Runs once per process; falls back to Courier if nothing is found.
 func ensureFont() {
 	fontOnce.Do(func() {
-		// font.UserFontDir may be empty; resolve it explicitly.
 		dir := font.UserFontDir
 		if dir == "" {
 			dir = pdfcpuFontDir()
@@ -127,7 +115,6 @@ func ensureFont() {
 		if dir != "" {
 			_ = os.MkdirAll(dir, 0o755)
 		}
-
 		for _, path := range candidateFonts {
 			if _, err := os.Stat(path); err != nil {
 				continue
@@ -136,18 +123,17 @@ func ensureFont() {
 				continue
 			}
 			font.LoadUserFonts()
-			names := font.UserFontNames()
-			if len(names) > 0 {
+			if names := font.UserFontNames(); len(names) > 0 {
 				activeFontName = names[0]
 				return
 			}
 		}
-		// No font found — activeFontName stays "Courier" (Latin-only fallback).
 	})
 }
 
-// blankPagesJSON returns a pdfcpu "create" JSON describing n A4 pages, each
-// carrying a single near-invisible space (pdfcpu requires page content).
+// ── Blank page helper ────────────────────────────────────────────────────────
+
+// blankPagesJSON returns a pdfcpu "create" JSON describing n blank A4 pages.
 func blankPagesJSON(n int) string {
 	if n < 1 {
 		n = 1
@@ -164,52 +150,112 @@ func blankPagesJSON(n int) string {
 	return b.String()
 }
 
-// signPageLines returns text lines for the sign page in Russian (кириллица).
-func signPageLines(signatures []SignatureInfo) []string {
-	var lines []string
-	lines = append(lines, "ЛИСТ ПОДПИСЕЙ")
-	lines = append(lines, "")
-	for i, s := range signatures {
-		if i > 0 {
-			lines = append(lines, "------------------------------------------------")
-			lines = append(lines, "")
-		}
-		lines = append(lines, fmt.Sprintf("ДОКУМЕНТ ПОДПИСАН ЭЦП (%d)", i+1))
-		lines = append(lines, fmt.Sprintf("Дата подписания:  %s", formatTS(s.SignedAt)))
-		if s.OrgName != "" {
-			lines = append(lines, fmt.Sprintf("Организация:      %s", s.OrgName))
-		}
-		if s.BIN != "" {
-			lines = append(lines, fmt.Sprintf("БИН:              %s", s.BIN))
-		}
-		lines = append(lines, fmt.Sprintf("Подписант:        %s", s.SignerName))
-		if s.IIN != "" {
-			lines = append(lines, fmt.Sprintf("ИИН:              %s", MaskIIN(s.IIN)))
-		}
-		lines = append(lines, fmt.Sprintf("Тип:              %s", s.SignerType))
-		if s.Basis != "" {
-			lines = append(lines, fmt.Sprintf("Основание:        %s", s.Basis))
-		}
-		lines = append(lines, "")
-		lines = append(lines, "СЕРТИФИКАТ")
-		lines = append(lines, fmt.Sprintf("УЦ:               %s", s.CAName))
-		lines = append(lines, fmt.Sprintf("№ сертификата:    %s", TruncateCertSerial(s.CertSerial)))
-		lines = append(lines, fmt.Sprintf("Действителен:     с %s по %s",
-			formatDate(s.CertNotBefore), formatDate(s.CertNotAfter)))
-		lines = append(lines, "")
-		lines = append(lines, "ПОДПИСЬ")
-		lines = append(lines, fmt.Sprintf("Формат:           %s", s.SignFormat))
-		lines = append(lines, fmt.Sprintf("Хэш SHA-256:      %s", TruncateSHA256(s.SHA256Hash)))
-		lines = append(lines, fmt.Sprintf("Статус:           %s", s.Status))
-		lines = append(lines, "")
-	}
-	return lines
+// ── Page stamper ─────────────────────────────────────────────────────────────
+
+// stamper applies text and image watermarks to a PDF byte slice.
+type stamper struct {
+	cur    []byte
+	conf   *model.Configuration
+	err    error
+	tmpDir string
+	imgIdx int
 }
 
-// GenerateSignPage renders a single PDF page listing all signatures.
-// Each line is stamped as a separate watermark for reliable positioning.
-// Requires a Cyrillic-capable TTF font to be available on the host
-// (see candidateFonts). Falls back to Courier (Latin only) if none found.
+func newStamper(base []byte, conf *model.Configuration, tmpDir string) *stamper {
+	return &stamper{cur: base, conf: conf, tmpDir: tmpDir}
+}
+
+// txt stamps a text watermark.
+//   x, yFromTop — position in pt (x from left edge, y from top edge)
+//   centered = true → uses pos:tc (horizontally centered on page; x is ignored)
+func (s *stamper) txt(text string, x, yFromTop, pts int, colorHex string, centered bool) {
+	if s.err != nil || text == "" {
+		return
+	}
+	var pos string
+	if centered {
+		pos = fmt.Sprintf("pos:tc, off:0 -%d", yFromTop)
+	} else {
+		pos = fmt.Sprintf("pos:tl, off:%d -%d", x, yFromTop)
+	}
+	desc := fmt.Sprintf(
+		"font:%s, points:%d, scale:1 abs, %s, rot:0, fillc:%s, opacity:1",
+		activeFontName, pts, pos, colorHex,
+	)
+	wm, err := pdfcpu.ParseTextWatermarkDetails(text, desc, true, types.POINTS)
+	if err != nil {
+		s.err = fmt.Errorf("pdf: parse text wm %q: %w", text, err)
+		return
+	}
+	var out bytes.Buffer
+	if err := api.AddWatermarks(bytes.NewReader(s.cur), &out, nil, wm, s.conf); err != nil {
+		s.err = fmt.Errorf("pdf: stamp text %q: %w", text, err)
+		return
+	}
+	s.cur = out.Bytes()
+}
+
+// img stamps a PNG image watermark. sizePt is the desired square side in pt.
+// Position: top-left corner at (xFromLeft, yFromTop).
+func (s *stamper) img(png []byte, xFromLeft, yFromTop, sizePt int) {
+	if s.err != nil || len(png) == 0 {
+		return
+	}
+	path := fmt.Sprintf("%s/qr%d.png", s.tmpDir, s.imgIdx)
+	s.imgIdx++
+	if err := os.WriteFile(path, png, 0o600); err != nil {
+		s.err = fmt.Errorf("pdf: write img: %w", err)
+		return
+	}
+	// pdfcpu image scale is relative to page height (842pt on A4).
+	scale := float64(sizePt) / 842.0
+	desc := fmt.Sprintf("pos:tl, off:%d -%d, scale:%.4f rel, rot:0, opacity:1",
+		xFromLeft, yFromTop, scale)
+	wm, err := pdfcpu.ParseImageWatermarkDetails(path, desc, true, types.POINTS)
+	if err != nil {
+		s.err = fmt.Errorf("pdf: parse img wm: %w", err)
+		return
+	}
+	var out bytes.Buffer
+	if err := api.AddWatermarks(bytes.NewReader(s.cur), &out, nil, wm, s.conf); err != nil {
+		s.err = fmt.Errorf("pdf: stamp img: %w", err)
+		return
+	}
+	s.cur = out.Bytes()
+}
+
+func (s *stamper) result() ([]byte, error) {
+	return s.cur, s.err
+}
+
+// ── GenerateSignPage ──────────────────────────────────────────────────────────
+
+const (
+	colorBlack = "#000000"
+	colorGreen = "#2D7D1F"
+	colorGray  = "#888888"
+	colorLine  = "#BBBBBB"
+
+	// Layout constants (pt, A4 = 595×842)
+	spMargin  = 20  // left/right margin
+	spQRSize  = 100 // QR image side in pt
+	spQRGap   = 14  // gap between QR right edge and text column
+	spTextX   = spMargin + spQRSize + spQRGap // 134
+
+	spTitlePt    = 13
+	spSubtitlePt = 10
+	spHeaderPt   = 11 // "✓ ДОКУМЕНТ ПОДПИСАН ЭЦП"
+	spBodyPt     = 9
+	spSmallPt    = 7
+
+	spLineH  = 13 // body line height
+	spHdrLH  = 15 // block-header line height
+	spBlankH = 7  // blank-line advance
+)
+
+// GenerateSignPage renders one PDF page with all signatures, matching the
+// CLAUDE.md reference layout: QR on the left, text fields on the right,
+// coloured headers, Cyrillic via ArialUnicodeMS.
 func GenerateSignPage(signatures []SignatureInfo) ([]byte, error) {
 	ensureFont()
 
@@ -217,47 +263,109 @@ func GenerateSignPage(signatures []SignatureInfo) ([]byte, error) {
 
 	var base bytes.Buffer
 	if err := api.Create(nil, strings.NewReader(blankPagesJSON(1)), &base, conf); err != nil {
-		return nil, fmt.Errorf("pdf: create blank sign page: %w", err)
+		return nil, fmt.Errorf("pdf: create blank page: %w", err)
 	}
 
-	lines := signPageLines(signatures)
+	tmpDir, err := os.MkdirTemp("", "signpage-")
+	if err != nil {
+		return nil, fmt.Errorf("pdf: temp dir: %w", err)
+	}
+	defer os.RemoveAll(tmpDir)
 
-	const (
-		fontPt     = 9
-		lineH      = 13 // pt between lines
-		topMargin  = 45
-		leftMargin = 40
-	)
+	st := newStamper(base.Bytes(), conf, tmpDir)
 
-	cur := base.Bytes()
-	lineIdx := 0
-	for _, line := range lines {
-		if strings.TrimSpace(line) == "" {
-			lineIdx++
-			continue
+	// ── Page header ──────────────────────────────────────────
+	st.txt("ЛИСТ ПОДПИСЕЙ", 0, 36, spTitlePt, colorBlack, true)
+	st.txt("Электронные цифровые подписи документа", 0, 54, spSubtitlePt, colorGray, true)
+	st.txt(strings.Repeat("─", 100), 0, 67, spSmallPt, colorLine, true)
+
+	y := 82 // current Y from top of page (top of first block)
+
+	for i, s := range signatures {
+		// ── Separator between blocks ──────────────────────────
+		if i > 0 {
+			st.txt(strings.Repeat("- ", 60), spMargin, y, spSmallPt, colorLine, false)
+			y += 14
 		}
-		yOff := topMargin + lineIdx*lineH
-		desc := fmt.Sprintf(
-			"font:%s, points:%d, scale:1 abs, pos:tl, off:%d -%d, rot:0, fillc:#000000, opacity:1",
-			activeFontName, fontPt, leftMargin, yOff,
-		)
-		wm, err := pdfcpu.ParseTextWatermarkDetails(line, desc, true, types.POINTS)
-		if err != nil {
-			return nil, fmt.Errorf("pdf: parse sign-page line: %w", err)
+
+		blockTop := y
+
+		// ── QR image + caption ───────────────────────────────
+		st.img(s.QRImagePNG, spMargin, blockTop, spQRSize)
+		st.txt("Сканируйте", spMargin, blockTop+spQRSize+3, spSmallPt, colorGray, false)
+		st.txt("для проверки", spMargin, blockTop+spQRSize+3+spSmallPt+2, spSmallPt, colorGray, false)
+
+		// ── Block header ──────────────────────────────────────
+		st.txt(fmt.Sprintf("✓ ДОКУМЕНТ ПОДПИСАН ЭЦП (%d)", i+1), spTextX, y, spHeaderPt, colorGreen, false)
+		y += spHdrLH
+
+		st.txt(fmt.Sprintf("Дата подписания:  %s", formatTS(s.SignedAt)), spTextX, y, spBodyPt, colorBlack, false)
+		y += spLineH
+
+		y += spBlankH
+
+		// ── Signer fields ─────────────────────────────────────
+		if s.OrgName != "" {
+			st.txt(fmt.Sprintf("Организация:      %s", s.OrgName), spTextX, y, spBodyPt, colorBlack, false)
+			y += spLineH
 		}
-		var out bytes.Buffer
-		if err := api.AddWatermarks(bytes.NewReader(cur), &out, nil, wm, conf); err != nil {
-			return nil, fmt.Errorf("pdf: stamp sign-page line: %w", err)
+		if s.BIN != "" {
+			st.txt(fmt.Sprintf("БИН:              %s", s.BIN), spTextX, y, spBodyPt, colorBlack, false)
+			y += spLineH
 		}
-		cur = out.Bytes()
-		lineIdx++
+		st.txt(fmt.Sprintf("Подписант:        %s", s.SignerName), spTextX, y, spBodyPt, colorBlack, false)
+		y += spLineH
+		if s.IIN != "" {
+			st.txt(fmt.Sprintf("ИИН:              %s", MaskIIN(s.IIN)), spTextX, y, spBodyPt, colorBlack, false)
+			y += spLineH
+		}
+		st.txt(fmt.Sprintf("Тип:              %s", s.SignerType), spTextX, y, spBodyPt, colorBlack, false)
+		y += spLineH
+		if s.Basis != "" {
+			st.txt(fmt.Sprintf("Основание:        %s", s.Basis), spTextX, y, spBodyPt, colorBlack, false)
+			y += spLineH
+		}
+
+		y += spBlankH
+
+		// ── Certificate section ───────────────────────────────
+		st.txt("СЕРТИФИКАТ", spTextX, y, spBodyPt, colorBlack, false)
+		y += spLineH
+		st.txt(fmt.Sprintf("УЦ:               %s", s.CAName), spTextX, y, spBodyPt, colorBlack, false)
+		y += spLineH
+		st.txt(fmt.Sprintf("№ сертификата:    %s", TruncateCertSerial(s.CertSerial)), spTextX, y, spBodyPt, colorBlack, false)
+		y += spLineH
+		st.txt(fmt.Sprintf("Действителен:     с %s по %s",
+			formatDate(s.CertNotBefore), formatDate(s.CertNotAfter)), spTextX, y, spBodyPt, colorBlack, false)
+		y += spLineH
+
+		y += spBlankH
+
+		// ── Signature section ─────────────────────────────────
+		st.txt("ПОДПИСЬ", spTextX, y, spBodyPt, colorBlack, false)
+		y += spLineH
+		st.txt(fmt.Sprintf("Формат:           %s", s.SignFormat), spTextX, y, spBodyPt, colorBlack, false)
+		y += spLineH
+		st.txt(fmt.Sprintf("Хэш SHA-256:      %s", TruncateSHA256(s.SHA256Hash)), spTextX, y, spBodyPt, colorBlack, false)
+		y += spLineH
+		st.txt(fmt.Sprintf("Статус:           %s ✓", s.Status), spTextX, y, spBodyPt, colorGreen, false)
+		y += spLineH
+
+		// Ensure Y cursor is below the QR image before next block.
+		qrBottom := blockTop + spQRSize + 20
+		if y < qrBottom {
+			y = qrBottom
+		}
+
+		y += 10 // spacing after block
 	}
 
-	return cur, nil
+	return st.result()
 }
 
-// ReplaceLastPage drops the last page of pdfBytes and appends newPageBytes
-// (a single-page PDF). Resulting page count = original - 1 + 1.
+// ── ReplaceLastPage ───────────────────────────────────────────────────────────
+
+// ReplaceLastPage drops the last page of pdfBytes and appends newPageBytes.
 func ReplaceLastPage(pdfBytes []byte, newPageBytes []byte) ([]byte, error) {
 	conf := model.NewDefaultConfiguration()
 
@@ -265,7 +373,6 @@ func ReplaceLastPage(pdfBytes []byte, newPageBytes []byte) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("pdf: page count: %w", err)
 	}
-
 	if count <= 1 {
 		cp := make([]byte, len(newPageBytes))
 		copy(cp, newPageBytes)
