@@ -70,6 +70,7 @@ func main() {
 	signHandler := handler.NewSignHandler(signSvc, queries)
 	verifyHandler := handler.NewVerifyHandler(queries)
 	demoHandler := handler.NewDemoHandler(queries, store)
+	documentHandler := handler.NewDocumentHandler(queries, store, cfg.App.VerifyBaseURL)
 
 	r := chi.NewRouter()
 
@@ -112,6 +113,10 @@ func main() {
 		api.Post("/documents", signHandler.HandleCreateDocument)
 		api.Get("/documents/{id}", signHandler.HandleGetDocument)
 		api.Post("/documents/{id}/sign", signHandler.HandleSign)
+
+		// Production document upload/download
+		api.Post("/documents/upload", documentHandler.HandleUploadDocument)
+		api.Get("/documents/{id}/download", documentHandler.HandleDownloadDocument)
 	})
 
 	srv := &http.Server{
