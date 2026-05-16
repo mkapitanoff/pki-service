@@ -78,7 +78,7 @@ func main() {
 	r.Use(func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Access-Control-Allow-Origin", "http://localhost:3000")
-			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
 			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
 			if r.Method == http.MethodOptions {
 				w.WriteHeader(http.StatusNoContent)
@@ -110,13 +110,14 @@ func main() {
 		api.Use(handler.APIKeyAuth(queries))
 		api.Use(handler.RateLimiter(cfg.RateLimit.APIPerMinute))
 
+		// Document management
 		api.Post("/documents", signHandler.HandleCreateDocument)
 		api.Get("/documents/{id}", signHandler.HandleGetDocument)
 		api.Post("/documents/{id}/sign", signHandler.HandleSign)
 
-		// Production document upload/download
-		api.Post("/documents/upload", documentHandler.HandleUploadDocument)
-		api.Get("/documents/{id}/download", documentHandler.HandleDownloadDocument)
+		// Production upload/download — paths avoid {id} wildcard conflict
+		api.Post("/upload", documentHandler.HandleUploadDocument)
+		api.Get("/documents/{id}/file", documentHandler.HandleDownloadDocument)
 	})
 
 	srv := &http.Server{
