@@ -53,7 +53,7 @@ export type Document = {
   status: DocumentStatus;
   current_version: number;
   s3_key_current: string;
-  signatures: Signature[];
+  signatures: Signature[] | null;
   created_at: string;
   updated_at: string;
 };

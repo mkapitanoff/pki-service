@@ -255,9 +255,10 @@ export default function DocumentPage({
   }
 
   const statusCfg = STATUS_CONFIG[doc.status] ?? STATUS_CONFIG.draft;
+  const sigs = doc.signatures ?? [];
   const currentHash =
-    doc.signatures.length > 0
-      ? doc.signatures[doc.signatures.length - 1].sha256_hash
+    sigs.length > 0
+      ? sigs[sigs.length - 1].sha256_hash
       : "";
 
   return (
@@ -297,7 +298,7 @@ export default function DocumentPage({
           <div className="flex flex-wrap gap-3 text-sm text-zinc-500 mb-5">
             <span>Версия: {doc.current_version}</span>
             <span>·</span>
-            <span>Подписей: {doc.signatures.length}</span>
+            <span>Подписей: {sigs.length}</span>
             <span>·</span>
             <span>Обновлён: {fmtDate(doc.updated_at)}</span>
           </div>
@@ -313,7 +314,7 @@ export default function DocumentPage({
               onSigned={load}
             />
 
-            {doc.signatures.length > 0 && (
+            {sigs.length > 0 && (
               <a
                 href={`${API_BASE}/api/demo/download/${doc.id}`}
                 target="_blank"
@@ -354,15 +355,15 @@ export default function DocumentPage({
         {/* Signatures */}
         <div>
           <h2 className="text-base font-semibold text-zinc-700 mb-3">
-            Подписи ({doc.signatures.length})
+            Подписи ({sigs.length})
           </h2>
-          {doc.signatures.length === 0 ? (
+          {sigs.length === 0 ? (
             <div className="bg-white rounded-2xl border border-zinc-200 p-8 text-center text-zinc-400 text-sm">
               Документ ещё не подписан
             </div>
           ) : (
             <div className="space-y-3">
-              {doc.signatures.map((sig) => (
+              {sigs.map((sig) => (
                 <SignatureCard key={sig.id} sig={sig} />
               ))}
             </div>
