@@ -36,7 +36,7 @@ func TestAddQRStamps_AppliesToEveryPage(t *testing.T) {
 
 	out, err := AddQRStamps(base.Bytes(), stamps)
 	require.NoError(t, err)
-	require.True(t, bytes.Equal(out[:5], []byte("%PDF-")))
+	require.True(t, bytes.HasPrefix(out, []byte("%PDF-")))
 
 	n, err := api.PageCount(bytes.NewReader(out), conf)
 	require.NoError(t, err)

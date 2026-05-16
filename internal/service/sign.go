@@ -119,8 +119,11 @@ func (s *SignService) Sign(ctx context.Context, input SignInput) (*SignResult, e
 		return nil, apperr.ErrCertRevoked
 	}
 
-	// 8. Timestamp — берём из TSP внутри CMS (NCANode v3 возвращает его в VerifyCMS).
-	tspTime := vr.TSPTime
+	// 8. Timestamp.
+	tspTime, err := s.ncanode.GetTSP(ctx, docSHA256)
+	if err != nil {
+		return nil, apperr.ErrInternal.WithCause(err)
+	}
 
 	// 9. sequence_num = count(existing) + 1.
 	existing, err := s.queries.GetSignaturesByDocument(ctx, repository.GetSignaturesByDocumentParams{

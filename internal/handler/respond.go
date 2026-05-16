@@ -3,7 +3,6 @@ package handler
 import (
 	"database/sql"
 	"encoding/json"
-	"fmt"
 	"net/http"
 
 	apperr "github.com/mkapitanoff/pki-service/internal/errors"
@@ -20,7 +19,6 @@ func respondJSON(w http.ResponseWriter, status int, body any) {
 }
 
 func respondError(w http.ResponseWriter, err error) {
-	if err != nil { fmt.Println("RESPOND_ERROR:", err.Error()) }
 	ae := apperr.As(err)
 	if ae == nil {
 		ae = apperr.ErrInternal

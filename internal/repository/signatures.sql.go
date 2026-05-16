@@ -251,43 +251,6 @@ func (q *Queries) GetSignature(ctx context.Context, arg GetSignatureParams) (Sig
 	return i, err
 }
 
-const getSignatureByIDPublic = `-- name: GetSignatureByIDPublic :one
-SELECT id, document_id, tenant_id, version_number, sequence_num, cms_b64, role, signer_iin, signer_name, signer_bin, org_name, signer_type, basis, cert_serial, cert_not_before, cert_not_after, ca_name, ocsp_status, ocsp_checked_at, tsp_time, sha256_hash, sign_format, qr_url, signed_at FROM signatures
-WHERE id = $1
-`
-
-func (q *Queries) GetSignatureByIDPublic(ctx context.Context, id uuid.UUID) (Signature, error) {
-	row := q.db.QueryRowContext(ctx, getSignatureByIDPublic, id)
-	var i Signature
-	err := row.Scan(
-		&i.ID,
-		&i.DocumentID,
-		&i.TenantID,
-		&i.VersionNumber,
-		&i.SequenceNum,
-		&i.CmsB64,
-		&i.Role,
-		&i.SignerIin,
-		&i.SignerName,
-		&i.SignerBin,
-		&i.OrgName,
-		&i.SignerType,
-		&i.Basis,
-		&i.CertSerial,
-		&i.CertNotBefore,
-		&i.CertNotAfter,
-		&i.CaName,
-		&i.OcspStatus,
-		&i.OcspCheckedAt,
-		&i.TspTime,
-		&i.Sha256Hash,
-		&i.SignFormat,
-		&i.QrUrl,
-		&i.SignedAt,
-	)
-	return i, err
-}
-
 const getSignaturesByDocument = `-- name: GetSignaturesByDocument :many
 SELECT id, document_id, tenant_id, version_number, sequence_num, cms_b64, role, signer_iin, signer_name, signer_bin, org_name, signer_type, basis, cert_serial, cert_not_before, cert_not_after, ca_name, ocsp_status, ocsp_checked_at, tsp_time, sha256_hash, sign_format, qr_url, signed_at FROM signatures
 WHERE document_id = $1 AND tenant_id = $2

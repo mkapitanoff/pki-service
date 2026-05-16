@@ -51,7 +51,7 @@ func TestGenerateSignPage_NonEmptyPDF(t *testing.T) {
 	out, err := GenerateSignPage([]SignatureInfo{sampleSignature(), sampleSignature()})
 	require.NoError(t, err)
 	require.NotEmpty(t, out)
-	require.True(t, bytes.Equal(out[:5], []byte("%PDF-")), "must be a PDF")
+	require.True(t, bytes.HasPrefix(out, []byte("%PDF-")), "must be a PDF")
 
 	n, err := api.PageCount(bytes.NewReader(out), model.NewDefaultConfiguration())
 	require.NoError(t, err)
