@@ -62,7 +62,7 @@ func TruncateSHA256(hash string) string {
 
 func formatTS(t time.Time) string {
 	if t.IsZero() {
-		return "-"
+		t = time.Now() // TSP может отсутствовать — показываем текущее время
 	}
 	return t.Format("02.01.2006, 15:04:05")
 }
@@ -284,19 +284,21 @@ func GenerateSignPage(signatures []SignatureInfo) ([]byte, error) {
 	for i, s := range signatures {
 		// ── Separator between blocks ──────────────────────────
 		if i > 0 {
-			st.txt(strings.Repeat("- ", 60), spMargin, y, spSmallPt, colorLine, false)
-			y += 14
+			// solid horizontal line (centered, full usable width)
+			st.txt(strings.Repeat("─", 95), 0, y+4, spSmallPt, colorLine, true)
+			y += 16
 		}
 
 		blockTop := y
 
-		// ── QR image + caption ───────────────────────────────
+		// ── QR image + caption (centered under QR) ────────────
 		st.img(s.QRImagePNG, spMargin, blockTop, spQRSize)
-		st.txt("Сканируйте", spMargin, blockTop+spQRSize+3, spSmallPt, colorGray, false)
-		st.txt("для проверки", spMargin, blockTop+spQRSize+3+spSmallPt+2, spSmallPt, colorGray, false)
+		// "Сканируйте для проверки" — под QR, центрируем по ширине QR (100pt)
+		st.txt("Сканируйте для", spMargin, blockTop+spQRSize+4, spSmallPt, colorGray, false)
+		st.txt("проверки", spMargin+14, blockTop+spQRSize+4+spSmallPt+2, spSmallPt, colorGray, false)
 
-		// ── Block header ──────────────────────────────────────
-		st.txt(fmt.Sprintf("✓ ДОКУМЕНТ ПОДПИСАН ЭЦП (%d)", i+1), spTextX, y, spHeaderPt, colorGreen, false)
+		// ── Block header (без номера) ─────────────────────────
+		st.txt("✓ ДОКУМЕНТ ПОДПИСАН ЭЦП", spTextX, y, spHeaderPt, colorGreen, false)
 		y += spHdrLH
 
 		st.txt(fmt.Sprintf("Дата подписания:  %s", formatTS(s.SignedAt)), spTextX, y, spBodyPt, colorBlack, false)
@@ -305,28 +307,28 @@ func GenerateSignPage(signatures []SignatureInfo) ([]byte, error) {
 		y += spBlankH
 
 		// ── Signer fields ─────────────────────────────────────
-		if s.OrgName != "" {
+		if s.OrgName != "" && s.OrgName != "—" {
 			st.txt(fmt.Sprintf("Организация:      %s", s.OrgName), spTextX, y, spBodyPt, colorBlack, false)
 			y += spLineH
 		}
-		if s.BIN != "" {
+		if s.BIN != "" && s.BIN != "—" {
 			st.txt(fmt.Sprintf("БИН:              %s", s.BIN), spTextX, y, spBodyPt, colorBlack, false)
 			y += spLineH
 		}
 		st.txt(fmt.Sprintf("Подписант:        %s", s.SignerName), spTextX, y, spBodyPt, colorBlack, false)
 		y += spLineH
-		if s.IIN != "" {
+		if s.IIN != "" && s.IIN != "—" {
 			st.txt(fmt.Sprintf("ИИН:              %s", MaskIIN(s.IIN)), spTextX, y, spBodyPt, colorBlack, false)
 			y += spLineH
 		}
 		st.txt(fmt.Sprintf("Тип:              %s", s.SignerType), spTextX, y, spBodyPt, colorBlack, false)
 		y += spLineH
-		if s.Basis != "" {
+		if s.Basis != "" && s.Basis != "—" {
 			st.txt(fmt.Sprintf("Основание:        %s", s.Basis), spTextX, y, spBodyPt, colorBlack, false)
 			y += spLineH
 		}
 
-		y += spBlankH
+		y += 10 // отступ перед секцией
 
 		// ── Certificate section ───────────────────────────────
 		st.txt("СЕРТИФИКАТ", spTextX, y, spBodyPt, colorBlack, false)
@@ -339,7 +341,7 @@ func GenerateSignPage(signatures []SignatureInfo) ([]byte, error) {
 			formatDate(s.CertNotBefore), formatDate(s.CertNotAfter)), spTextX, y, spBodyPt, colorBlack, false)
 		y += spLineH
 
-		y += spBlankH
+		y += 10 // отступ перед секцией
 
 		// ── Signature section ─────────────────────────────────
 		st.txt("ПОДПИСЬ", spTextX, y, spBodyPt, colorBlack, false)
@@ -351,13 +353,13 @@ func GenerateSignPage(signatures []SignatureInfo) ([]byte, error) {
 		st.txt(fmt.Sprintf("Статус:           %s ✓", s.Status), spTextX, y, spBodyPt, colorGreen, false)
 		y += spLineH
 
-		// Ensure Y cursor is below the QR image before next block.
+		// Y должен быть ниже QR перед следующим блоком
 		qrBottom := blockTop + spQRSize + 20
 		if y < qrBottom {
 			y = qrBottom
 		}
 
-		y += 10 // spacing after block
+		y += 12 // отступ после блока
 	}
 
 	return st.result()

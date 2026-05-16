@@ -94,6 +94,7 @@ const STATUS_CONFIG: Record<
 // ---- SignatureCard ----
 
 function SignatureCard({ sig }: { sig: Signature }) {
+  console.log("sha256:", sig.sha256_hash);
   const cfg = sig.ocsp_status === "good"
     ? { label: "Подпись действительна ✓", color: "text-[#00b894]" }
     : { label: "Статус неизвестен", color: "text-zinc-400" };
@@ -168,7 +169,7 @@ function SignatureCard({ sig }: { sig: Signature }) {
         </p>
         <p>
           <span className="font-medium">SHA-256:</span>{" "}
-          <span className="font-mono">{maskHash(sig.sha256_hash)}</span>
+          <span className="font-mono">{maskHash(nullStr(sig.sha256_hash)) || "—"}</span>
         </p>
         <p className={clsx("font-medium", cfg.color)}>{cfg.label}</p>
       </div>
