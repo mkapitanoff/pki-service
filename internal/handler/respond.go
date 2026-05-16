@@ -1,9 +1,9 @@
 package handler
 
 import (
-	"fmt"
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"net/http"
 
 	apperr "github.com/mkapitanoff/pki-service/internal/errors"

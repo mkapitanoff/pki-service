@@ -100,8 +100,7 @@ func (h *VerifyHandler) HandleVerify(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	sig, err := h.queries.GetSignatureByIDPublic(r.Context(),
-		sigID)
+	sig, err := h.queries.GetSignatureByIDPublic(r.Context(), sigID)
 	if err != nil {
 		if stderrors.Is(err, sql.ErrNoRows) {
 			w.WriteHeader(http.StatusNotFound)

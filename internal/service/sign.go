@@ -5,7 +5,6 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	stderrors "errors"
-	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -100,10 +99,9 @@ func (s *SignService) Sign(ctx context.Context, input SignInput) (*SignResult, e
 	// 4. SHA-256 of the PDF.
 	sum := sha256.Sum256(pdfBytes)
 	docSHA256 := hex.EncodeToString(sum[:])
-	docBase64 := base64.StdEncoding.EncodeToString(pdfBytes)
 
 	// 5. Verify CMS. 6. Extract cert data. 7. Revoked -> 422.
-	vr, err := s.ncanode.VerifyCMS(ctx, input.CMS, docBase64)
+	vr, err := s.ncanode.VerifyCMS(ctx, input.CMS, docSHA256)
 	if err != nil {
 		switch {
 		case stderrors.Is(err, ncanode.ErrCMSInvalid):
@@ -121,7 +119,7 @@ func (s *SignService) Sign(ctx context.Context, input SignInput) (*SignResult, e
 		return nil, apperr.ErrCertRevoked
 	}
 
-	// 8. Timestamp — taken from TSP embedded in CMS by NCANode.
+	// 8. Timestamp — берём из TSP внутри CMS (NCANode v3 возвращает его в VerifyCMS).
 	tspTime := vr.TSPTime
 
 	// 9. sequence_num = count(existing) + 1.
