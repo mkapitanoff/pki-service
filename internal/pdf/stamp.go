@@ -26,14 +26,17 @@ const (
 	stampMargin = 24
 )
 
-// AddQRStamps overlays each stamp's QR (80x80pt) on the bottom-left of every
-// page, laid out left-to-right with a 10pt gap, signer name below each QR.
+// AddQRStamps overlays each stamp's QR (80×80pt) on the bottom-left of every
+// page, laid out left-to-right with a 10pt gap.
+// Under each QR the label "Proverit ECP" is printed (Latin, Helvetica-safe).
 func AddQRStamps(pdfBytes []byte, stamps []QRStamp) ([]byte, error) {
 	if len(stamps) == 0 {
 		cp := make([]byte, len(pdfBytes))
 		copy(cp, pdfBytes)
 		return cp, nil
 	}
+
+	ensureFont()
 
 	conf := model.NewDefaultConfiguration()
 
@@ -46,16 +49,20 @@ func AddQRStamps(pdfBytes []byte, stamps []QRStamp) ([]byte, error) {
 	cur := make([]byte, len(pdfBytes))
 	copy(cur, pdfBytes)
 
+	// Use Cyrillic label if a Unicode font was loaded, otherwise Latin fallback.
+	label := "Proverit ECP"
+	if activeFontName != "Courier" {
+		label = "Проверить ЭЦП"
+	}
+
 	for i, st := range stamps {
 		xOff := stampMargin + i*(stampSizePt+stampGapPt)
 
+		// --- QR image ---
 		imgPath := filepath.Join(tmpDir, fmt.Sprintf("qr-%d.png", i))
 		if err := os.WriteFile(imgPath, st.QRImagePNG, 0o600); err != nil {
 			return nil, fmt.Errorf("pdf: write qr image: %w", err)
 		}
-
-		// pdfcpu image watermarks size via scalefactor (no absolute dim
-		// param); ~0.12 rel keeps the QR roughly stampSizePt on A4.
 		imgDesc := fmt.Sprintf(
 			"pos:bl, off:%d %d, scale:0.12 rel, rot:0, opacity:1",
 			xOff, stampMargin+12,
@@ -64,25 +71,20 @@ func AddQRStamps(pdfBytes []byte, stamps []QRStamp) ([]byte, error) {
 		if err != nil {
 			return nil, fmt.Errorf("pdf: parse qr stamp: %w", err)
 		}
-
 		var afterImg bytes.Buffer
 		if err := api.AddWatermarks(bytes.NewReader(cur), &afterImg, nil, imgWM, conf); err != nil {
 			return nil, fmt.Errorf("pdf: apply qr stamp: %w", err)
 		}
 
-		label := st.SignerName
-		if st.Role != "" {
-			label = st.SignerName + " (" + st.Role + ")"
-		}
+		// --- Label under QR ("Проверить ЭЦП" / "Proverit ECP") ---
 		txtDesc := fmt.Sprintf(
-			"font:Helvetica, points:6, scale:1 abs, pos:bl, off:%d %d, rot:0, fillc:#000000, opacity:1",
-			xOff, stampMargin,
+			"font:%s, points:6, scale:1 abs, pos:bl, off:%d %d, rot:0, fillc:#000000, opacity:1",
+			activeFontName, xOff, stampMargin,
 		)
 		txtWM, err := pdfcpu.ParseTextWatermarkDetails(label, txtDesc, true, types.POINTS)
 		if err != nil {
 			return nil, fmt.Errorf("pdf: parse stamp label: %w", err)
 		}
-
 		var afterTxt bytes.Buffer
 		if err := api.AddWatermarks(bytes.NewReader(afterImg.Bytes()), &afterTxt, nil, txtWM, conf); err != nil {
 			return nil, fmt.Errorf("pdf: apply stamp label: %w", err)
