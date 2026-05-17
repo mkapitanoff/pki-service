@@ -72,6 +72,8 @@ func nullString(s string) sql.NullString {
 
 // Sign implements the 20-step POST /api/v1/documents/:id/sign flow.
 func (s *SignService) Sign(ctx context.Context, input SignInput) (*SignResult, error) {
+	fmt.Printf("[sign] starting for doc=%s tenant=%s\n", input.DocumentID, input.TenantID)
+
 	// 1. tenant_id is resolved by auth middleware and passed in input.
 
 	// 2. SELECT document WHERE id AND tenant_id.
@@ -81,28 +83,33 @@ func (s *SignService) Sign(ctx context.Context, input SignInput) (*SignResult, e
 	})
 	if err != nil {
 		if stderrors.Is(err, sql.ErrNoRows) {
+			fmt.Printf("[sign] error at step 2 (get document): %v\n", err)
 			return nil, apperr.ErrDocumentNotFound
 		}
+		fmt.Printf("[sign] error at step 2 (get document): %v\n", err)
 		return nil, apperr.ErrInternal.WithCause(err)
 	}
 
-	// 3. Download current PDF (step 14: original when v0 — s3_key_current
-	//    already points at original for v0).
+	// 3. Download current PDF.
 	pdfBytes, err := s.storage.DownloadFile(ctx, doc.S3KeyCurrent)
 	if err != nil {
+		fmt.Printf("[sign] error at step 3 (download PDF, key=%s): %v\n", doc.S3KeyCurrent, err)
 		if stderrors.Is(err, storage.ErrNotFound) {
 			return nil, apperr.ErrDocumentNotFound.WithCause(err)
 		}
 		return nil, apperr.ErrInternal.WithCause(err)
 	}
+	fmt.Printf("[sign] step 3 OK: downloaded %d bytes\n", len(pdfBytes))
 
 	// 4. SHA-256 of the PDF.
 	sum := sha256.Sum256(pdfBytes)
 	docSHA256 := hex.EncodeToString(sum[:])
+	fmt.Printf("[sign] step 4 OK: sha256=%s\n", docSHA256)
 
 	// 5. Verify CMS. 6. Extract cert data. 7. Revoked -> 422.
 	vr, err := s.ncanode.VerifyCMS(ctx, input.CMS, docSHA256)
 	if err != nil {
+		fmt.Printf("[sign] error at step 5 (VerifyCMS): %v\n", err)
 		switch {
 		case stderrors.Is(err, ncanode.ErrCMSInvalid):
 			return nil, apperr.ErrCMSInvalid.WithCause(err)
@@ -113,17 +120,17 @@ func (s *SignService) Sign(ctx context.Context, input SignInput) (*SignResult, e
 		}
 	}
 	if !vr.Valid {
+		fmt.Printf("[sign] error at step 5: CMS invalid (vr.Valid=false)\n")
 		return nil, apperr.ErrCMSInvalid
 	}
 	if vr.OCSPStatus == ncanode.OCSPStatusRevoked {
+		fmt.Printf("[sign] error at step 7: cert revoked\n")
 		return nil, apperr.ErrCertRevoked
 	}
+	fmt.Printf("[sign] step 5-7 OK: signer=%s ocsp=%s tsp=%v\n", vr.SignerName, vr.OCSPStatus, vr.TSPTime)
 
-	// 8. Timestamp.
-	tspTime, err := s.ncanode.GetTSP(ctx, docSHA256)
-	if err != nil {
-		return nil, apperr.ErrInternal.WithCause(err)
-	}
+	// 8. Timestamp — берём из TSP внутри CMS (NCANode v3 возвращает его в VerifyCMS).
+	tspTime := vr.TSPTime
 
 	// 9. sequence_num = count(existing) + 1.
 	existing, err := s.queries.GetSignaturesByDocument(ctx, repository.GetSignaturesByDocumentParams{
@@ -131,6 +138,7 @@ func (s *SignService) Sign(ctx context.Context, input SignInput) (*SignResult, e
 		TenantID:   input.TenantID,
 	})
 	if err != nil {
+		fmt.Printf("[sign] error at step 9 (get signatures): %v\n", err)
 		return nil, apperr.ErrInternal.WithCause(err)
 	}
 	sequenceNum := int32(len(existing) + 1)
@@ -189,16 +197,20 @@ func (s *SignService) Sign(ctx context.Context, input SignInput) (*SignResult, e
 	}
 	stamped, err := pdf.AddQRStamps(pdfBytes, stamps)
 	if err != nil {
+		fmt.Printf("[sign] error at step 15a (AddQRStamps): %v\n", err)
 		return nil, apperr.ErrInternal.WithCause(err)
 	}
 	signPage, err := pdf.GenerateSignPage(sigInfos)
 	if err != nil {
+		fmt.Printf("[sign] error at step 15b (GenerateSignPage): %v\n", err)
 		return nil, apperr.ErrInternal.WithCause(err)
 	}
 	finalPDF, err := pdf.ReplaceLastPage(stamped, signPage)
 	if err != nil {
+		fmt.Printf("[sign] error at step 15c (ReplaceLastPage): %v\n", err)
 		return nil, apperr.ErrInternal.WithCause(err)
 	}
+	fmt.Printf("[sign] step 15 OK: final PDF %d bytes\n", len(finalPDF))
 
 	// 16. New s3 key.
 	newKey := s.storage.BuildKey(input.TenantID, input.DocumentID,
@@ -206,8 +218,10 @@ func (s *SignService) Sign(ctx context.Context, input SignInput) (*SignResult, e
 
 	// 17. Upload new PDF.
 	if err := s.storage.UploadFile(ctx, newKey, finalPDF, "application/pdf"); err != nil {
+		fmt.Printf("[sign] error at step 17 (upload PDF, key=%s): %v\n", newKey, err)
 		return nil, apperr.ErrInternal.WithCause(err)
 	}
+	fmt.Printf("[sign] step 17 OK: uploaded to %s\n", newKey)
 
 	newStatus := nextStatus(doc, sequenceNum)
 
@@ -215,6 +229,7 @@ func (s *SignService) Sign(ctx context.Context, input SignInput) (*SignResult, e
 	var createdSig repository.Signature
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
+		fmt.Printf("[sign] error at step 18 (begin tx): %v\n", err)
 		return nil, apperr.ErrInternal.WithCause(err)
 	}
 	committed := false
@@ -227,6 +242,7 @@ func (s *SignService) Sign(ctx context.Context, input SignInput) (*SignResult, e
 	qtx := s.queries.WithTx(tx)
 
 	// 18a. INSERT signature (sqlc, explicit precomputed id).
+	fmt.Printf("[sign] step 18 starting tx: sigID=%s version=%d seq=%d\n", newSignatureID, newVersion, sequenceNum)
 	createdSig, err = qtx.CreateSignatureWithID(ctx, repository.CreateSignatureWithIDParams{
 		ID:            newSignatureID,
 		DocumentID:    input.DocumentID,
@@ -253,6 +269,7 @@ func (s *SignService) Sign(ctx context.Context, input SignInput) (*SignResult, e
 		QrUrl:         qrURL,
 	})
 	if err != nil {
+		fmt.Printf("[sign] error at step 18a (insert signature): %v\n", err)
 		return nil, apperr.ErrInternal.WithCause(err)
 	}
 
@@ -263,6 +280,7 @@ func (s *SignService) Sign(ctx context.Context, input SignInput) (*SignResult, e
 		Version:    newVersion,
 		S3Key:      newKey,
 	}); err != nil {
+		fmt.Printf("[sign] error at step 18b (insert document_version): %v\n", err)
 		return nil, apperr.ErrInternal.WithCause(err)
 	}
 
@@ -274,6 +292,7 @@ func (s *SignService) Sign(ctx context.Context, input SignInput) (*SignResult, e
 		CurrentVersion: newVersion,
 		Status:         newStatus,
 	}); err != nil {
+		fmt.Printf("[sign] error at step 18c (update document): %v\n", err)
 		return nil, apperr.ErrInternal.WithCause(err)
 	}
 
@@ -290,12 +309,15 @@ func (s *SignService) Sign(ctx context.Context, input SignInput) (*SignResult, e
 		EntityID:   uuid.NullUUID{UUID: input.DocumentID, Valid: true},
 		Meta:       pqtype.NullRawMessage{RawMessage: auditMeta, Valid: len(auditMeta) > 0},
 	}); err != nil {
+		fmt.Printf("[sign] error at step 18d (audit log): %v\n", err)
 		return nil, apperr.ErrInternal.WithCause(err)
 	}
 
 	if err = tx.Commit(); err != nil {
+		fmt.Printf("[sign] error at step 18 (commit tx): %v\n", err)
 		return nil, apperr.ErrInternal.WithCause(err)
 	}
+	fmt.Printf("[sign] step 18 OK: committed, sigID=%s\n", createdSig.ID)
 	committed = true
 
 	// 19. Publish event (best-effort).
