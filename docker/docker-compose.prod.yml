@@ -8,10 +8,10 @@ services:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     ports:
-      - "127.0.0.1:5432:5432"   # только localhost в prod
+      - "127.0.0.1:5432:5432"
     volumes:
       - pg_prod_data:/var/lib/postgresql/data
-    restart: unless-stopped
+    restart: always
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB:-eds_prod}"]
       interval: 10s
@@ -26,7 +26,7 @@ services:
       - "127.0.0.1:6379:6379"
     volumes:
       - redis_prod_data:/data
-    restart: unless-stopped
+    restart: always
 
   rabbitmq:
     image: rabbitmq:3.12-alpine
@@ -38,7 +38,41 @@ services:
       - "127.0.0.1:5672:5672"
     volumes:
       - rmq_prod_data:/var/lib/rabbitmq
-    restart: unless-stopped
+    restart: always
+
+  minio:
+    image: minio/minio:latest
+    container_name: pki_minio_prod
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY}
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY}
+    ports:
+      - "127.0.0.1:9000:9000"
+      - "127.0.0.1:9001:9001"
+    volumes:
+      - minio_prod_data:/data
+    restart: always
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  minio-init:
+    image: minio/mc:latest
+    container_name: pki_minio_init_prod
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+        mc alias set local http://minio:9000 ${MINIO_ACCESS_KEY} ${MINIO_SECRET_KEY};
+        mc mb --ignore-existing local/eds-prod;
+        mc anonymous set none local/eds-prod;
+        echo 'MinIO bucket eds-prod ready';
+      "
+    restart: "no"
 
   ncanode:
     image: malikzh/ncanode:latest
@@ -60,7 +94,12 @@ services:
         http://pki.gov.kz/cert/nca_gost2022.cer
     ports:
       - "127.0.0.1:14579:14579"
-    restart: unless-stopped
+    restart: always
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:14579/"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
 
   api:
     build:
@@ -70,37 +109,24 @@ services:
     environment:
       APP_ENV: prod
     env_file:
-      - ../.env.prod          # этот файл не в git, создаётся вручную на сервере
+      - ../.env.prod
     ports:
       - "127.0.0.1:8080:8080"
     depends_on:
       postgres:
         condition: service_healthy
+      minio:
+        condition: service_healthy
+      ncanode:
+        condition: service_healthy
       redis:
         condition: service_started
       rabbitmq:
         condition: service_started
-      ncanode:
-        condition: service_started
-    restart: unless-stopped
-
-  worker:
-    build:
-      context: ..
-      dockerfile: docker/Dockerfile.worker
-    container_name: pki_worker_prod
-    environment:
-      APP_ENV: prod
-    env_file:
-      - ../.env.prod
-    depends_on:
-      postgres:
-        condition: service_healthy
-      rabbitmq:
-        condition: service_started
-    restart: unless-stopped
+    restart: always
 
 volumes:
   pg_prod_data:
   redis_prod_data:
   rmq_prod_data:
+  minio_prod_data:
