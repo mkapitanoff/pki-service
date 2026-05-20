@@ -4,30 +4,30 @@ app:
   verify_base_url: "http://localhost:8080"
 
 database:
-  dsn: "postgres://user:pass@localhost:5432/eds_prod?sslmode=disable"
+  dsn: "postgres://user:pass@postgres:5432/eds_prod?sslmode=disable"
   max_open_conns: 10
   max_idle_conns: 5
   conn_max_lifetime_sec: 300
 
 ncanode:
-  url: "http://localhost:14579"
+  url: "http://ncanode:14579"
   timeout_sec: 30
 
 storage:
-  endpoint: "http://localhost:9000"
+  endpoint: "http://minio:9000"
   region: "us-east-1"
-  bucket: "eds-test"
+  bucket: "eds-prod"
   access_key: "minioadmin"
   secret_key: "minioadmin"
   use_path_style: true    # true для MinIO, false для AWS S3
 
 redis:
-  addr: "localhost:6379"
+  addr: "redis:6379"
   password: ""
   db: 0
 
 rabbitmq:
-  url: "amqp://guest:guest@localhost:5672/"
+  url: "amqp://guest:guest@rabbitmq:5672/"
   webhook_queue: "webhook.delivery"
   event_exchange: "eds.events"
   prefetch_count: 5
