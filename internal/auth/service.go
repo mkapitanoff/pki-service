@@ -48,19 +48,29 @@ func NewAuthService(queries *repository.Queries, jwtSecret string) *AuthService 
 }
 
 // Register creates a new user with role "user". Returns 409 if email is taken.
+// If tenantID is uuid.Nil, a personal tenant is automatically created.
 func (s *AuthService) Register(ctx context.Context, email, password, name string, tenantID uuid.UUID) (*repository.User, error) {
 	hash, err := bcrypt.GenerateFromPassword([]byte(password), 12)
 	if err != nil {
 		return nil, apperr.ErrInternal.WithCause(err)
 	}
 
-	tid := uuid.NullUUID{UUID: tenantID, Valid: tenantID != uuid.Nil}
+	if tenantID == uuid.Nil {
+		tenant, err := s.queries.CreateTenant(ctx, repository.CreateTenantParams{
+			Name: name + " Personal",
+			Type: repository.TenantTypeIndividual,
+		})
+		if err != nil {
+			return nil, apperr.ErrInternal.WithCause(err)
+		}
+		tenantID = tenant.ID
+	}
 
 	user, err := s.queries.CreateUser(ctx, repository.CreateUserParams{
 		Email:        email,
 		PasswordHash: string(hash),
 		Name:         name,
-		TenantID:     tid,
+		TenantID:     uuid.NullUUID{UUID: tenantID, Valid: true},
 		Role:         "user",
 	})
 	if err != nil {

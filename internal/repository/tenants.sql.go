@@ -11,6 +11,28 @@ import (
 	"github.com/google/uuid"
 )
 
+const createTenant = `-- name: CreateTenant :one
+INSERT INTO tenants (name, type) VALUES ($1, $2) RETURNING id, name, type, is_active, created_at
+`
+
+type CreateTenantParams struct {
+	Name string     `json:"name"`
+	Type TenantType `json:"type"`
+}
+
+func (q *Queries) CreateTenant(ctx context.Context, arg CreateTenantParams) (Tenant, error) {
+	row := q.db.QueryRowContext(ctx, createTenant, arg.Name, arg.Type)
+	var i Tenant
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Type,
+		&i.IsActive,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const getTenant = `-- name: GetTenant :one
 SELECT id, name, type, is_active, created_at FROM tenants
 WHERE id = $1

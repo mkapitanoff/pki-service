@@ -17,6 +17,7 @@ type Querier interface {
 	CreateDocumentVersion(ctx context.Context, arg CreateDocumentVersionParams) (DocumentVersion, error)
 	CreateSignature(ctx context.Context, arg CreateSignatureParams) (Signature, error)
 	CreateSignatureWithID(ctx context.Context, arg CreateSignatureWithIDParams) (Signature, error)
+	CreateTenant(ctx context.Context, arg CreateTenantParams) (Tenant, error)
 	CreateUser(ctx context.Context, arg CreateUserParams) (User, error)
 	CreateWebhookDelivery(ctx context.Context, arg CreateWebhookDeliveryParams) (WebhookDelivery, error)
 	DeleteAuthToken(ctx context.Context, tokenHash string) error
