@@ -15,6 +15,7 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 	_ "github.com/lib/pq"
 
+	"github.com/mkapitanoff/pki-service/internal/auth"
 	"github.com/mkapitanoff/pki-service/internal/config"
 	"github.com/mkapitanoff/pki-service/internal/handler"
 	"github.com/mkapitanoff/pki-service/internal/ncanode"
@@ -66,6 +67,9 @@ func main() {
 		log.Fatalf("storage: %v", err)
 	}
 
+	authSvc := auth.NewAuthService(queries, cfg.App.JWTSecret)
+	authHandler := handler.NewAuthHandler(authSvc)
+
 	signSvc := service.NewSignService(db, ncClient, store, queries, nil, cfg.App.VerifyBaseURL)
 	signHandler := handler.NewSignHandler(signSvc, queries)
 	verifyHandler := handler.NewVerifyHandler(queries)
@@ -78,7 +82,7 @@ func main() {
 	r.Use(func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Access-Control-Allow-Origin", "http://localhost:3000")
-			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
 			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
 			if r.Method == http.MethodOptions {
 				w.WriteHeader(http.StatusNoContent)
@@ -102,12 +106,26 @@ func main() {
 		pub.Get("/verify/{signature_id}", verifyHandler.HandleVerify)
 	})
 
+	// Auth routes — public (no auth required).
+	r.Post("/auth/register", authHandler.HandleRegister)
+	r.Post("/auth/login", authHandler.HandleLogin)
+
+	// Auth routes — require JWT.
+	jwtMw := handler.JWTAuth(authSvc)
+	r.Group(func(protected chi.Router) {
+		protected.Use(jwtMw)
+		protected.Get("/auth/me", authHandler.HandleMe)
+		protected.Post("/auth/logout", authHandler.HandleLogout)
+	})
+
 	// Demo routes — no auth, for frontend testing only.
 	r.Post("/api/demo/upload", demoHandler.HandleUpload)
 	r.Get("/api/demo/download/{id}", demoHandler.HandleDownload)
 
+	// /api/v1 — supports both JWT and API-key auth.
+	dualMw := handler.DualAuth(jwtMw, handler.APIKeyAuth(queries))
 	r.Route("/api/v1", func(api chi.Router) {
-		api.Use(handler.APIKeyAuth(queries))
+		api.Use(dualMw)
 		api.Use(handler.RateLimiter(cfg.RateLimit.APIPerMinute))
 
 		api.Post("/documents", signHandler.HandleCreateDocument)

@@ -167,6 +167,14 @@ type AuditLog struct {
 	CreatedAt  time.Time             `json:"created_at"`
 }
 
+type AuthToken struct {
+	ID        uuid.UUID     `json:"id"`
+	UserID    uuid.NullUUID `json:"user_id"`
+	TokenHash string        `json:"token_hash"`
+	ExpiresAt time.Time     `json:"expires_at"`
+	CreatedAt sql.NullTime  `json:"created_at"`
+}
+
 type Document struct {
 	ID             uuid.UUID             `json:"id"`
 	TenantID       uuid.UUID             `json:"tenant_id"`
@@ -222,6 +230,18 @@ type Tenant struct {
 	Type      TenantType `json:"type"`
 	IsActive  bool       `json:"is_active"`
 	CreatedAt time.Time  `json:"created_at"`
+}
+
+type User struct {
+	ID           uuid.UUID     `json:"id"`
+	Email        string        `json:"email"`
+	PasswordHash string        `json:"password_hash"`
+	Name         string        `json:"name"`
+	TenantID     uuid.NullUUID `json:"tenant_id"`
+	Role         string        `json:"role"`
+	IsActive     sql.NullBool  `json:"is_active"`
+	CreatedAt    sql.NullTime  `json:"created_at"`
+	LastLoginAt  sql.NullTime  `json:"last_login_at"`
 }
 
 type Webhook struct {

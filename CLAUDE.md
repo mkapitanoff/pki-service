@@ -263,8 +263,22 @@ CREATE INDEX idx_audit_tenant_time ON audit_log(tenant_id, created_at DESC);
 ## API контракт
 
 ### Аутентификация
-Все /api/v1/* требуют: Authorization: Bearer <api-key>
-/verify/:signature_id — публичный, без auth, rate limit 60 req/min per IP.
+
+**Email + пароль (JWT):**
+- `POST /auth/register { email, password, name }` → 201 `{ user: {...}, token }`
+- `POST /auth/login { email, password }` → 200 `{ user: {...}, token }` / 401
+- `GET  /auth/me` (Bearer JWT) → 200 `{ id, email, name, role, tenant_id }`
+- `POST /auth/logout` (Bearer JWT) → 200 `{ ok: true }`
+
+JWT: HS256, payload `{ sub: user_id, email, role, tenant_id, exp: +24h }`.
+Секрет: `app.jwt_secret` в конфиге (обязательно задать в .env.prod или yaml).
+
+**API-ключ (машинный доступ):**
+Все `/api/v1/*` принимают оба варианта `Authorization: Bearer <token>`:
+- Если токен содержит 2 точки → JWT-аутентификация
+- Иначе → API-ключ (sha256 ключа проверяется по таблице api_keys)
+
+`/verify/:signature_id` — публичный, без auth, rate limit 60 req/min per IP.
 
 ### Роуты
 
@@ -527,14 +541,15 @@ go test ./... -v -count=1
 
 ## Текущий статус (обновлять вручную)
 
-- [ ] Модуль 0: Scaffold + Docker Compose (test + prod) + Config
-- [ ] Модуль 1: DB миграции + sqlc генерация + repository layer
-- [ ] Модуль 2: NCANode client + mock для тестов
-- [ ] Модуль 3: S3 storage layer
-- [ ] Модуль 4: PDF — QR-штамп + Лист подписей (pdfcpu)
-- [ ] Модуль 5: Sign service (оркестрация) + Handler
-- [ ] Модуль 6: API-key auth middleware + tenant context
-- [ ] Модуль 7: Публичный /verify/:signature_id (HTML)
+- [x] Модуль 0: Scaffold + Docker Compose (test + prod) + Config
+- [x] Модуль 1: DB миграции + sqlc генерация + repository layer
+- [x] Модуль 2: NCANode client + mock для тестов
+- [x] Модуль 3: S3 storage layer
+- [x] Модуль 4: PDF — QR-штамп + Лист подписей (pdfcpu)
+- [x] Модуль 5: Sign service (оркестрация) + Handler
+- [x] Модуль 6: API-key auth middleware + tenant context
+- [x] Модуль 7: Публичный /verify/:signature_id (HTML)
+- [x] Модуль 10: Email+пароль auth (JWT) + admin seed
 - [ ] Модуль 8: RabbitMQ + Webhook delivery
 - [ ] Модуль 9: Тесты (unit + integration)
 

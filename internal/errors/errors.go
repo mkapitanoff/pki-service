@@ -40,13 +40,15 @@ func (e *AppError) WithCause(cause error) *AppError {
 }
 
 var (
-	ErrCMSInvalid       = &AppError{Code: "CMS_INVALID", Status: 422, Message: "CMS signature is invalid"}
-	ErrCertRevoked      = &AppError{Code: "CERT_REVOKED", Status: 422, Message: "Certificate is revoked"}
-	ErrDocumentNotFound = &AppError{Code: "DOCUMENT_NOT_FOUND", Status: 404, Message: "Document not found"}
-	ErrUnauthorized     = &AppError{Code: "UNAUTHORIZED", Status: 401, Message: "Unauthorized"}
-	ErrForbidden        = &AppError{Code: "FORBIDDEN", Status: 403, Message: "Forbidden"}
-	ErrInvalidRequest   = &AppError{Code: "INVALID_REQUEST", Status: 400, Message: "Invalid request"}
-	ErrInternal         = &AppError{Code: "INTERNAL", Status: 500, Message: "Internal server error"}
+	ErrCMSInvalid        = &AppError{Code: "CMS_INVALID", Status: 422, Message: "CMS signature is invalid"}
+	ErrCertRevoked       = &AppError{Code: "CERT_REVOKED", Status: 422, Message: "Certificate is revoked"}
+	ErrDocumentNotFound  = &AppError{Code: "DOCUMENT_NOT_FOUND", Status: 404, Message: "Document not found"}
+	ErrUnauthorized      = &AppError{Code: "UNAUTHORIZED", Status: 401, Message: "Unauthorized"}
+	ErrForbidden         = &AppError{Code: "FORBIDDEN", Status: 403, Message: "Forbidden"}
+	ErrInvalidRequest    = &AppError{Code: "INVALID_REQUEST", Status: 400, Message: "Invalid request"}
+	ErrInternal          = &AppError{Code: "INTERNAL", Status: 500, Message: "Internal server error"}
+	ErrEmailTaken        = &AppError{Code: "EMAIL_TAKEN", Status: 409, Message: "Email already registered"}
+	ErrInvalidCredentials = &AppError{Code: "INVALID_CREDENTIALS", Status: 401, Message: "Invalid email or password"}
 )
 
 // As extracts an *AppError from err, or maps unknown errors to ErrInternal.

@@ -138,6 +138,24 @@ func RateLimiter(requestsPerMinute int) func(http.Handler) http.Handler {
 	}
 }
 
+// DualAuth routes to jwtMw when the token looks like a JWT (two dots in the
+// base64 parts), otherwise falls through to apiKeyMw.
+func DualAuth(jwtMw, apiKeyMw func(http.Handler) http.Handler) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		jwtH := jwtMw(next)
+		apiH := apiKeyMw(next)
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			authz := r.Header.Get("Authorization")
+			token := strings.TrimSpace(strings.TrimPrefix(authz, "Bearer "))
+			if strings.Count(token, ".") == 2 {
+				jwtH.ServeHTTP(w, r)
+			} else {
+				apiH.ServeHTTP(w, r)
+			}
+		})
+	}
+}
+
 func clientIP(r *http.Request) string {
 	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
 		if i := strings.IndexByte(xff, ','); i >= 0 {

@@ -2,6 +2,7 @@ app:
   env: prod
   port: 8080
   verify_base_url: "http://localhost:8080"
+  jwt_secret: "CHANGE_ME_USE_STRONG_SECRET_32CHARS"
 
 database:
   dsn: "postgres://user:pass@postgres:5432/eds_prod?sslmode=disable"

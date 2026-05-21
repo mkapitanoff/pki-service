@@ -6,6 +6,7 @@ app:
   env: prod
   port: 8080
   verify_base_url: "https://sign.your-domain.kz"   # ← заменить
+  jwt_secret: "CHANGE_ME_USE_STRONG_SECRET_MIN_32_CHARS"   # ← обязательно заменить
 
 database:
   dsn: "postgres://PROD_USER:PROD_PASSWORD@postgres:5432/eds_prod?sslmode=require"

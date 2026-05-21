@@ -2,6 +2,7 @@ app:
   env: test
   port: 8080
   verify_base_url: "http://localhost:8080"
+  jwt_secret: "test-jwt-secret-change-in-prod"
 
 database:
   dsn: "postgres://user:pass@localhost:5432/eds_test?sslmode=disable"

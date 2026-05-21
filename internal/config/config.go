@@ -11,6 +11,7 @@ type AppConfig struct {
 	Env           string `mapstructure:"env"`
 	Port          int    `mapstructure:"port"`
 	VerifyBaseURL string `mapstructure:"verify_base_url"`
+	JWTSecret     string `mapstructure:"jwt_secret"`
 }
 
 type DatabaseConfig struct {
