@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Upload, FileText, Loader2, AlertCircle } from "lucide-react";
 import clsx from "clsx";
 import { demoUpload } from "@/lib/api";
+import AuthGuard from "@/components/AuthGuard";
 
 export default function UploadPage() {
   const router = useRouter();
@@ -52,6 +53,7 @@ export default function UploadPage() {
   };
 
   return (
+    <AuthGuard>
     <main className="min-h-screen bg-zinc-50 flex items-center justify-center p-4">
       <div className="w-full max-w-lg">
         <div className="text-center mb-8">
@@ -160,5 +162,6 @@ export default function UploadPage() {
         </div>
       </div>
     </main>
+    </AuthGuard>
   );
 }

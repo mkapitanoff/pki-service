@@ -1,6 +1,6 @@
 "use client";
 
-import { use, useEffect, useState, useCallback } from "react";
+import { use, useEffect, useState, useCallback } from "react"; // use is needed in DocumentPage
 import Link from "next/link";
 import {
   ArrowLeft,
@@ -15,6 +15,7 @@ import {
 import clsx from "clsx";
 import { getDocument, API_BASE, Document, Signature, DocumentStatus } from "@/lib/api";
 import { SignModal } from "./sign-modal";
+import AuthGuard from "@/components/AuthGuard";
 
 // ---- helpers ----
 
@@ -191,13 +192,7 @@ function SignatureCard({ sig }: { sig: Signature }) {
 
 // ---- Page ----
 
-export default function DocumentPage({
-  params,
-}: {
-  params: Promise<{ id: string }>;
-}) {
-  const { id } = use(params);
-
+function DocumentPageInner({ id }: { id: string }) {
   const [doc, setDoc] = useState<Document | null>(null);
   const [docBase64, setDocBase64] = useState<string>("");
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -372,5 +367,18 @@ export default function DocumentPage({
         </div>
       </div>
     </main>
+  );
+}
+
+export default function DocumentPage({
+  params,
+}: {
+  params: Promise<{ id: string }>;
+}) {
+  const { id } = use(params);
+  return (
+    <AuthGuard>
+      <DocumentPageInner id={id} />
+    </AuthGuard>
   );
 }

@@ -1,10 +1,31 @@
 export const API_BASE = "http://localhost:8080";
 const API_KEY = "test-api-key-12345";
+const TOKEN_KEY = "pki_token";
 
-const headers = () => ({
-  "Content-Type": "application/json",
-  Authorization: `Bearer ${API_KEY}`,
-});
+// ---- Token helpers ----
+
+export function getAuthToken(): string | null {
+  if (typeof window === "undefined") return null;
+  return localStorage.getItem(TOKEN_KEY);
+}
+
+export function setAuthToken(token: string): void {
+  localStorage.setItem(TOKEN_KEY, token);
+}
+
+export function clearAuthToken(): void {
+  localStorage.removeItem(TOKEN_KEY);
+}
+
+// ---- Headers: JWT if present, otherwise API_KEY fallback ----
+
+function authHeaders(includeContentType = true): HeadersInit {
+  const token = getAuthToken();
+  const bearer = token ?? API_KEY;
+  const h: HeadersInit = { Authorization: `Bearer ${bearer}` };
+  if (includeContentType) h["Content-Type"] = "application/json";
+  return h;
+}
 
 async function handleResponse<T>(res: Response): Promise<T> {
   if (!res.ok) {
@@ -16,6 +37,14 @@ async function handleResponse<T>(res: Response): Promise<T> {
 }
 
 // ---- Types ----
+
+export type User = {
+  id: string;
+  email: string;
+  name: string;
+  role: string;
+  tenant_id: string;
+};
 
 export type DocumentStatus =
   | "draft"
@@ -71,7 +100,50 @@ export type DemoUploadResult = {
   status: string;
 };
 
-// ---- API calls ----
+// ---- Auth API ----
+
+export async function register(
+  email: string,
+  password: string,
+  name: string
+): Promise<{ user: User; token: string }> {
+  const res = await fetch(`${API_BASE}/auth/register`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email, password, name }),
+  });
+  return handleResponse(res);
+}
+
+export async function login(
+  email: string,
+  password: string
+): Promise<{ user: User; token: string }> {
+  const res = await fetch(`${API_BASE}/auth/login`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email, password }),
+  });
+  return handleResponse(res);
+}
+
+export async function logout(): Promise<void> {
+  await fetch(`${API_BASE}/auth/logout`, {
+    method: "POST",
+    headers: authHeaders(),
+  }).catch(() => {});
+  clearAuthToken();
+}
+
+export async function me(): Promise<User> {
+  const res = await fetch(`${API_BASE}/auth/me`, {
+    headers: authHeaders(),
+    cache: "no-store",
+  });
+  return handleResponse(res);
+}
+
+// ---- Documents API ----
 
 export async function registerDocument(
   s3Key: string,
@@ -79,7 +151,7 @@ export async function registerDocument(
 ): Promise<{ id: string; status: string }> {
   const res = await fetch(`${API_BASE}/api/v1/documents`, {
     method: "POST",
-    headers: headers(),
+    headers: authHeaders(),
     body: JSON.stringify({ s3_key: s3Key, title }),
   });
   return handleResponse(res);
@@ -87,7 +159,7 @@ export async function registerDocument(
 
 export async function getDocument(id: string): Promise<Document> {
   const res = await fetch(`${API_BASE}/api/v1/documents/${id}`, {
-    headers: headers(),
+    headers: authHeaders(),
     cache: "no-store",
   });
   return handleResponse(res);
@@ -100,14 +172,12 @@ export async function signDocument(
 ): Promise<SignResult> {
   const res = await fetch(`${API_BASE}/api/v1/documents/${id}/sign`, {
     method: "POST",
-    headers: headers(),
+    headers: authHeaders(),
     body: JSON.stringify({ cms, role }),
   });
   return handleResponse(res);
 }
 
-// Upload: POST multipart form to /api/v1/upload (requires API key auth).
-// Backend stores the PDF in S3 and returns {document_id, title, sha256_hash, status}.
 export async function demoUpload(
   file: File,
   title: string
@@ -117,13 +187,12 @@ export async function demoUpload(
   form.append("title", title);
   const res = await fetch(`${API_BASE}/api/v1/upload`, {
     method: "POST",
-    headers: { Authorization: `Bearer ${API_KEY}` },
+    headers: { Authorization: `Bearer ${getAuthToken() ?? API_KEY}` },
     body: form,
   });
   return handleResponse(res);
 }
 
-// Demo sign: backend signs with the test NCA key, returns SignResult.
 export async function demoSign(
   documentId: string,
   role: string
@@ -132,7 +201,7 @@ export async function demoSign(
     `${API_BASE}/api/demo/sign/${documentId}?role=${encodeURIComponent(role)}`,
     {
       method: "POST",
-      headers: headers(),
+      headers: authHeaders(),
     }
   );
   return handleResponse(res);
