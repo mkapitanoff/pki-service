@@ -13,7 +13,8 @@ import {
   QrCode,
 } from "lucide-react";
 import clsx from "clsx";
-import { getDocument, API_BASE, Document, Signature, DocumentStatus } from "@/lib/api";
+import { getDocument, getAuthToken, API_BASE, Document, Signature, DocumentStatus } from "@/lib/api";
+const API_KEY = "test-api-key-12345";
 import { SignModal } from "./sign-modal";
 import AuthGuard from "@/components/AuthGuard";
 
@@ -311,15 +312,27 @@ function DocumentPageInner({ id }: { id: string }) {
             />
 
             {sigs.length > 0 && (
-              <a
-                href={`${API_BASE}/api/demo/download/${doc.id}`}
-                target="_blank"
-                rel="noopener noreferrer"
+              <button
+                type="button"
+                onClick={async () => {
+                  const token = getAuthToken() ?? API_KEY;
+                  const res = await fetch(`${API_BASE}/api/v1/documents/${doc.id}/file`, {
+                    headers: { Authorization: `Bearer ${token}` },
+                  });
+                  if (!res.ok) { alert("Ошибка скачивания"); return; }
+                  const blob = await res.blob();
+                  const url = URL.createObjectURL(blob);
+                  const a = document.createElement("a");
+                  a.href = url;
+                  a.download = `${doc.title ?? doc.id}_signed.pdf`;
+                  a.click();
+                  URL.revokeObjectURL(url);
+                }}
                 className="flex items-center gap-2 px-4 py-2 rounded-lg border border-zinc-300 text-zinc-700 text-sm font-medium hover:border-zinc-400 transition-colors"
               >
                 <Download className="w-4 h-4" />
                 Скачать PDF
-              </a>
+              </button>
             )}
           </div>
 
