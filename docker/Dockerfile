@@ -11,6 +11,7 @@ RUN go mod download
 COPY . .
 
 RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /out/pki-api ./cmd/api/main.go
+RUN CGO_ENABLED=0 GOOS=linux go build -o /out/pki-seed ./cmd/seed/main.go
 
 # ── Stage 2: Runtime ──────────────────────────────────────────────────────────
 FROM alpine:latest
@@ -19,8 +20,9 @@ RUN apk add --no-cache ca-certificates curl tzdata ttf-dejavu fontconfig && fc-c
 
 WORKDIR /app
 
-# Бинарник
+# Бинарники
 COPY --from=builder /out/pki-api .
+COPY --from=builder /out/pki-seed .
 
 # Конфиги
 COPY configs/ ./configs/
