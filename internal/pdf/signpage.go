@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -75,49 +76,46 @@ func formatDate(t time.Time) string {
 
 // ── Font management ──────────────────────────────────────────────────────────
 
-var candidateFonts = []string{
-	"/Library/Fonts/Arial Unicode.ttf",                         // macOS
-	"/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",         // Ubuntu/Debian
-	"/usr/share/fonts/dejavu/DejaVuSans.ttf",                  // Fedora
-	"/usr/share/fonts/TTF/DejaVuSans.ttf",                     // Arch
-	"/usr/share/fonts/truetype/freefont/FreeSans.ttf",
-	"/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",
-	"/usr/share/fonts/noto/NotoSans-Regular.ttf",
-}
-
 var (
 	fontOnce       sync.Once
-	activeFontName = "Courier" // Latin-only fallback
+	activeFontName = "Helvetica" // built-in pdfcpu fallback (no Cyrillic, but safe)
 )
 
-func pdfcpuFontDir() string {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return ""
-	}
-	if _, err := os.Stat("/Library"); err == nil {
-		return home + "/Library/Application Support/pdfcpu/fonts"
-	}
-	return home + "/.local/share/pdfcpu/fonts"
-}
-
-// ensureFont installs the first available Cyrillic TTF into pdfcpu's font
-// cache. Runs once per process; falls back to Courier if nothing is found.
+// ensureFont copies the first available Cyrillic TTF into pdfcpu's font dir
+// (~/.config/pdfcpu/fonts), installs it, then activates it.
+// Falls back to built-in Helvetica if no TTF is found.
 func ensureFont() {
 	fontOnce.Do(func() {
-		dir := font.UserFontDir
-		if dir == "" {
-			dir = pdfcpuFontDir()
-			font.UserFontDir = dir
+		homeDir, _ := os.UserHomeDir()
+		fontDir := filepath.Join(homeDir, ".config", "pdfcpu", "fonts")
+		_ = os.MkdirAll(fontDir, 0o755)
+		font.UserFontDir = fontDir
+
+		candidates := []string{
+			"/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", // Ubuntu/Debian/Alpine
+			"/usr/share/fonts/dejavu/DejaVuSans.ttf",          // Fedora
+			"/usr/share/fonts/TTF/DejaVuSans.ttf",             // Arch
+			"/usr/share/fonts/truetype/arial/Arial Unicode.ttf",
+			"/Library/Fonts/Arial Unicode.ttf", // macOS
 		}
-		if dir != "" {
-			_ = os.MkdirAll(dir, 0o755)
-		}
-		for _, path := range candidateFonts {
-			if _, err := os.Stat(path); err != nil {
+
+		for _, src := range candidates {
+			if _, err := os.Stat(src); err != nil {
 				continue
 			}
-			if err := api.InstallFonts([]string{path}); err != nil {
+			// Copy TTF into fontDir if not already present.
+			dst := filepath.Join(fontDir, filepath.Base(src))
+			if _, err := os.Stat(dst); err != nil {
+				data, err := os.ReadFile(src)
+				if err != nil {
+					continue
+				}
+				if err := os.WriteFile(dst, data, 0o644); err != nil {
+					continue
+				}
+			}
+			// InstallFonts expects a directory path.
+			if err := api.InstallFonts([]string{fontDir}); err != nil {
 				continue
 			}
 			font.LoadUserFonts()
@@ -126,6 +124,7 @@ func ensureFont() {
 				return
 			}
 		}
+		// No TTF found — keep built-in Helvetica (Latin-only, but won't crash).
 	})
 }
 

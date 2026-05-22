@@ -18,6 +18,11 @@ FROM alpine:latest
 
 RUN apk add --no-cache ca-certificates curl tzdata ttf-dejavu fontconfig && fc-cache -fv
 
+# Pre-install DejaVuSans into pdfcpu font cache so the app starts without delay.
+RUN mkdir -p /root/.config/pdfcpu/fonts && \
+    cp /usr/share/fonts/truetype/dejavu/DejaVuSans.ttf /root/.config/pdfcpu/fonts/ 2>/dev/null || \
+    find /usr/share/fonts -name "DejaVuSans.ttf" -exec cp {} /root/.config/pdfcpu/fonts/ \; 2>/dev/null || true
+
 WORKDIR /app
 
 # Бинарники
