@@ -262,18 +262,18 @@ export type AdminUser = {
 };
 
 export async function adminListTenants(): Promise<Tenant[]> {
-  return apiFetch("/admin/tenants");
+  return apiFetch("/api/admin/tenants");
 }
 
 export async function adminCreateTenant(name: string, type: string): Promise<Tenant> {
-  return apiFetch("/admin/tenants", {
+  return apiFetch("/api/admin/tenants", {
     method: "POST",
     body: JSON.stringify({ name, type }),
   });
 }
 
 export async function adminListKeys(tenantId: string): Promise<ApiKey[]> {
-  return apiFetch(`/admin/tenants/${tenantId}/keys`);
+  return apiFetch(`/api/admin/tenants/${tenantId}/keys`);
 }
 
 export async function adminCreateKey(
@@ -281,18 +281,18 @@ export async function adminCreateKey(
   label: string,
   expiresAt?: string
 ): Promise<ApiKey & { key: string }> {
-  return apiFetch(`/admin/tenants/${tenantId}/keys`, {
+  return apiFetch(`/api/admin/tenants/${tenantId}/keys`, {
     method: "POST",
     body: JSON.stringify({ label, expires_at: expiresAt ?? null }),
   });
 }
 
 export async function adminDeactivateKey(tenantId: string, keyId: string): Promise<void> {
-  return apiFetch(`/admin/tenants/${tenantId}/keys/${keyId}`, { method: "DELETE" });
+  return apiFetch(`/api/admin/tenants/${tenantId}/keys/${keyId}`, { method: "DELETE" });
 }
 
 export async function adminListUsers(): Promise<AdminUser[]> {
-  return apiFetch("/admin/users");
+  return apiFetch("/api/admin/users");
 }
 
 export async function adminUpdateUser(
@@ -300,7 +300,7 @@ export async function adminUpdateUser(
   role: string,
   isActive: boolean
 ): Promise<AdminUser> {
-  return apiFetch(`/admin/users/${userId}`, {
+  return apiFetch(`/api/admin/users/${userId}`, {
     method: "PATCH",
     body: JSON.stringify({ role, is_active: isActive }),
   });
@@ -313,12 +313,12 @@ export async function adminCreateUser(
   role: string,
   tenantId?: string
 ): Promise<AdminUser> {
-  return apiFetch("/admin/users", {
+  return apiFetch("/api/admin/users", {
     method: "POST",
     body: JSON.stringify({ email, password, name, role, tenant_id: tenantId ?? "" }),
   });
 }
 
 export async function adminDeleteUser(userId: string): Promise<void> {
-  return apiFetch(`/admin/users/${userId}`, { method: "DELETE" });
+  return apiFetch(`/api/admin/users/${userId}`, { method: "DELETE" });
 }
