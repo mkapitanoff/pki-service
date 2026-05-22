@@ -142,6 +142,16 @@ func (s *SignService) Sign(ctx context.Context, input SignInput) (*SignResult, e
 		fmt.Printf("[sign] error at step 9 (get signatures): %v\n", err)
 		return nil, apperr.ErrInternal.WithCause(err)
 	}
+	// 9a. Проверяем что этот ИИН ещё не подписывал.
+	if vr.SignerIIN != "" {
+		for _, sig := range existing {
+			if sig.SignerIin.String == vr.SignerIIN {
+				fmt.Printf("[sign] duplicate IIN detected: %s\n", vr.SignerIIN)
+				return nil, apperr.ErrAlreadySigned
+			}
+		}
+	}
+
 	sequenceNum := int32(len(existing) + 1)
 	newVersion := doc.CurrentVersion + 1
 
@@ -325,13 +335,15 @@ func (s *SignService) Sign(ctx context.Context, input SignInput) (*SignResult, e
 	downloadURL := fmt.Sprintf("%s/api/v1/documents/%s/file", s.verifyBaseURL, input.DocumentID)
 	if s.publisher != nil {
 		_ = s.publisher.Publish(ctx, "signature.added", map[string]any{
-			"event":        "document.signed",
-			"document_id":  input.DocumentID,
-			"signature_id": createdSig.ID,
-			"signer_name":  createdSig.SignerName,
-			"signed_at":    createdSig.SignedAt,
-			"tenant_id":    input.TenantID,
-			"download_url": downloadURL,
+			"event":             "document.signed",
+			"document_id":       input.DocumentID,
+			"signature_id":      createdSig.ID,
+			"signer_name":       createdSig.SignerName,
+			"signed_at":         createdSig.SignedAt,
+			"tenant_id":         input.TenantID,
+			"download_url":      downloadURL,
+			"signatures_count":  int(sequenceNum),
+			"document_status":   string(newStatus),
 		})
 	}
 
@@ -370,20 +382,19 @@ func signatureToInfo(s repository.Signature) pdf.SignatureInfo {
 	}
 }
 
-// nextStatus implements DRAFT/PENDING -> PARTIALLY_SIGNED -> SIGNED. When the
-// document metadata carries {"expected_signatures": N}, the document becomes
-// SIGNED once sequenceNum >= N; otherwise it stays PARTIALLY_SIGNED.
+// nextStatus: 1 подпись → partially_signed, ≥2 → signed.
+// Если в metadata задано expected_signatures — используем его вместо дефолтного 2.
 func nextStatus(doc repository.Document, sequenceNum int32) repository.DocStatus {
-	expected := 0
+	expected := 2
 	if doc.Metadata.Valid {
 		var m struct {
 			ExpectedSignatures int `json:"expected_signatures"`
 		}
-		if err := json.Unmarshal(doc.Metadata.RawMessage, &m); err == nil {
+		if err := json.Unmarshal(doc.Metadata.RawMessage, &m); err == nil && m.ExpectedSignatures > 0 {
 			expected = m.ExpectedSignatures
 		}
 	}
-	if expected > 0 && int(sequenceNum) >= expected {
+	if int(sequenceNum) >= expected {
 		return repository.DocStatusSigned
 	}
 	return repository.DocStatusPartiallySigned

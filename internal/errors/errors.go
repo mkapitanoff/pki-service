@@ -49,6 +49,7 @@ var (
 	ErrInternal          = &AppError{Code: "INTERNAL", Status: 500, Message: "Internal server error"}
 	ErrEmailTaken        = &AppError{Code: "EMAIL_TAKEN", Status: 409, Message: "Email already registered"}
 	ErrInvalidCredentials = &AppError{Code: "INVALID_CREDENTIALS", Status: 401, Message: "Invalid email or password"}
+	ErrAlreadySigned     = &AppError{Code: "ALREADY_SIGNED", Status: 409, Message: "This person has already signed this document"}
 )
 
 // As extracts an *AppError from err, or maps unknown errors to ErrInternal.

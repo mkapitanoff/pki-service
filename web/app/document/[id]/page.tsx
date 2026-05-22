@@ -67,19 +67,19 @@ const STATUS_CONFIG: Record<
   { label: string; color: string; icon: React.ReactNode }
 > = {
   draft: {
-    label: "Черновик",
+    label: "Не подписан",
     color: "bg-zinc-100 text-zinc-600",
     icon: <Clock className="w-3.5 h-3.5" />,
   },
   pending: {
-    label: "Ожидает подписи",
-    color: "bg-amber-50 text-[#fdcb6e] border border-amber-200",
+    label: "Ожидает подписания",
+    color: "bg-amber-50 text-amber-600 border border-amber-200",
     icon: <Clock className="w-3.5 h-3.5" />,
   },
   partially_signed: {
-    label: "Частично подписан",
-    color: "bg-blue-50 text-[#0070f3] border border-blue-200",
-    icon: <FileSignature className="w-3.5 h-3.5" />,
+    label: "Ожидает подписания",
+    color: "bg-amber-50 text-amber-600 border border-amber-200",
+    icon: <Clock className="w-3.5 h-3.5" />,
   },
   signed: {
     label: "Подписан",
@@ -302,14 +302,16 @@ function DocumentPageInner({ id }: { id: string }) {
 
           {/* Action buttons */}
           <div className="flex flex-wrap gap-2">
-            <SignModal
-              documentId={doc.id}
-              documentTitle={nullStr(doc.title) || "Документ"}
-              sha256Hash={currentHash}
-              role={role}
-              documentBase64={docBase64}
-              onSigned={load}
-            />
+            {doc.status !== "signed" && (
+              <SignModal
+                documentId={doc.id}
+                documentTitle={nullStr(doc.title) || "Документ"}
+                sha256Hash={currentHash}
+                role={role}
+                documentBase64={docBase64}
+                onSigned={load}
+              />
+            )}
 
             {sigs.length > 0 && (
               <button
@@ -337,28 +339,30 @@ function DocumentPageInner({ id }: { id: string }) {
           </div>
 
           {/* Role selector for signing */}
-          <div className="mt-4 flex items-center gap-2">
-            <span className="text-xs text-zinc-500">Роль:</span>
-            {["client", "factor", "director"].map((r) => (
-              <button
-                key={r}
-                type="button"
-                onClick={() => setRole(r)}
-                className={clsx(
-                  "px-2.5 py-1 rounded-md text-xs font-medium border transition-colors",
-                  role === r
-                    ? "bg-[#0070f3] text-white border-[#0070f3]"
-                    : "border-zinc-300 text-zinc-500 hover:border-zinc-400"
-                )}
-              >
-                {r === "client"
-                  ? "Клиент"
-                  : r === "factor"
-                    ? "Фактор"
-                    : "Директор"}
-              </button>
-            ))}
-          </div>
+          {doc.status !== "signed" && (
+            <div className="mt-4 flex items-center gap-2">
+              <span className="text-xs text-zinc-500">Роль:</span>
+              {["client", "factor", "director"].map((r) => (
+                <button
+                  key={r}
+                  type="button"
+                  onClick={() => setRole(r)}
+                  className={clsx(
+                    "px-2.5 py-1 rounded-md text-xs font-medium border transition-colors",
+                    role === r
+                      ? "bg-[#0070f3] text-white border-[#0070f3]"
+                      : "border-zinc-300 text-zinc-500 hover:border-zinc-400"
+                  )}
+                >
+                  {r === "client"
+                    ? "Клиент"
+                    : r === "factor"
+                      ? "Фактор"
+                      : "Директор"}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
 
         {/* Signatures */}
