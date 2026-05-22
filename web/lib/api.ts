@@ -40,6 +40,7 @@ async function handleResponse<T>(res: Response): Promise<T> {
 
 async function apiFetch<T = unknown>(path: string, options: RequestInit = {}): Promise<T> {
   const token = getAuthToken();
+  console.log("[apiFetch]", path, "token:", token?.slice(0, 20));
   const res = await fetch(`${API_BASE}${path}`, {
     ...options,
     headers: {
