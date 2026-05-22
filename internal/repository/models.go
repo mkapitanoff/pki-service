@@ -186,6 +186,7 @@ type Document struct {
 	Metadata       pqtype.NullRawMessage `json:"metadata"`
 	CreatedAt      time.Time             `json:"created_at"`
 	UpdatedAt      time.Time             `json:"updated_at"`
+	CallbackUrl    sql.NullString        `json:"callback_url"`
 }
 
 type DocumentVersion struct {

@@ -1,8 +1,8 @@
 -- name: CreateDocument :one
 INSERT INTO documents (
-    tenant_id, title, s3_key_original, s3_key_current, current_version, status, metadata
+    tenant_id, title, s3_key_original, s3_key_current, current_version, status, metadata, callback_url
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7
+    $1, $2, $3, $4, $5, $6, $7, $8
 )
 RETURNING *;
 
@@ -25,3 +25,6 @@ RETURNING *;
 -- name: CreateDocumentVersion :one
 INSERT INTO document_versions (document_id, tenant_id, version, s3_key)
 VALUES ($1, $2, $3, $4) RETURNING *;
+
+-- name: GetDocumentCallbackURL :one
+SELECT callback_url FROM documents WHERE id = $1;

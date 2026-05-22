@@ -64,6 +64,7 @@ type SignResult struct {
 	SignatureID       uuid.UUID
 	SignedDocumentURL string
 	Signature         repository.Signature
+	RedirectURL       string // non-empty when document has a callback_url
 }
 
 func nullString(s string) sql.NullString {
@@ -321,19 +322,31 @@ func (s *SignService) Sign(ctx context.Context, input SignInput) (*SignResult, e
 	committed = true
 
 	// 19. Publish event (best-effort).
+	downloadURL := fmt.Sprintf("%s/api/v1/documents/%s/file", s.verifyBaseURL, input.DocumentID)
 	if s.publisher != nil {
 		_ = s.publisher.Publish(ctx, "signature.added", map[string]any{
+			"event":        "document.signed",
 			"document_id":  input.DocumentID,
 			"signature_id": createdSig.ID,
+			"signer_name":  createdSig.SignerName,
+			"signed_at":    createdSig.SignedAt,
 			"tenant_id":    input.TenantID,
+			"download_url": downloadURL,
 		})
 	}
 
-	// 20. Respond.
+	// 20. Build redirect_url from callback_url if present.
+	redirectURL := ""
+	if cbk := doc.CallbackUrl; cbk.Valid && cbk.String != "" {
+		redirectURL = fmt.Sprintf("%s?document_id=%s&status=signed", cbk.String, input.DocumentID)
+	}
+
+	// 21. Respond.
 	return &SignResult{
 		SignatureID:       createdSig.ID,
 		SignedDocumentURL: newKey,
 		Signature:         createdSig,
+		RedirectURL:       redirectURL,
 	}, nil
 }
 

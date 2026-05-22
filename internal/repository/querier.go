@@ -6,6 +6,7 @@ package repository
 
 import (
 	"context"
+	"database/sql"
 
 	"github.com/google/uuid"
 )
@@ -28,6 +29,7 @@ type Querier interface {
 	GetAPIKeyByHash(ctx context.Context, keyHash string) (ApiKey, error)
 	GetAuthTokenByHash(ctx context.Context, tokenHash string) (AuthToken, error)
 	GetDocument(ctx context.Context, arg GetDocumentParams) (Document, error)
+	GetDocumentCallbackURL(ctx context.Context, id uuid.UUID) (sql.NullString, error)
 	GetSignature(ctx context.Context, arg GetSignatureParams) (Signature, error)
 	GetSignatureByIDPublic(ctx context.Context, id uuid.UUID) (Signature, error)
 	GetSignaturesByDocument(ctx context.Context, arg GetSignaturesByDocumentParams) ([]Signature, error)

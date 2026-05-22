@@ -15,11 +15,11 @@ import (
 
 const createDocument = `-- name: CreateDocument :one
 INSERT INTO documents (
-    tenant_id, title, s3_key_original, s3_key_current, current_version, status, metadata
+    tenant_id, title, s3_key_original, s3_key_current, current_version, status, metadata, callback_url
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7
+    $1, $2, $3, $4, $5, $6, $7, $8
 )
-RETURNING id, tenant_id, title, s3_key_original, s3_key_current, current_version, status, metadata, created_at, updated_at
+RETURNING id, tenant_id, title, s3_key_original, s3_key_current, current_version, status, metadata, created_at, updated_at, callback_url
 `
 
 type CreateDocumentParams struct {
@@ -30,6 +30,7 @@ type CreateDocumentParams struct {
 	CurrentVersion int32                 `json:"current_version"`
 	Status         DocStatus             `json:"status"`
 	Metadata       pqtype.NullRawMessage `json:"metadata"`
+	CallbackUrl    sql.NullString        `json:"callback_url"`
 }
 
 func (q *Queries) CreateDocument(ctx context.Context, arg CreateDocumentParams) (Document, error) {
@@ -41,6 +42,7 @@ func (q *Queries) CreateDocument(ctx context.Context, arg CreateDocumentParams) 
 		arg.CurrentVersion,
 		arg.Status,
 		arg.Metadata,
+		arg.CallbackUrl,
 	)
 	var i Document
 	err := row.Scan(
@@ -54,6 +56,7 @@ func (q *Queries) CreateDocument(ctx context.Context, arg CreateDocumentParams) 
 		&i.Metadata,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.CallbackUrl,
 	)
 	return i, err
 }
@@ -90,7 +93,7 @@ func (q *Queries) CreateDocumentVersion(ctx context.Context, arg CreateDocumentV
 }
 
 const getDocument = `-- name: GetDocument :one
-SELECT id, tenant_id, title, s3_key_original, s3_key_current, current_version, status, metadata, created_at, updated_at FROM documents
+SELECT id, tenant_id, title, s3_key_original, s3_key_current, current_version, status, metadata, created_at, updated_at, callback_url FROM documents
 WHERE id = $1 AND tenant_id = $2
 `
 
@@ -113,15 +116,27 @@ func (q *Queries) GetDocument(ctx context.Context, arg GetDocumentParams) (Docum
 		&i.Metadata,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.CallbackUrl,
 	)
 	return i, err
+}
+
+const getDocumentCallbackURL = `-- name: GetDocumentCallbackURL :one
+SELECT callback_url FROM documents WHERE id = $1
+`
+
+func (q *Queries) GetDocumentCallbackURL(ctx context.Context, id uuid.UUID) (sql.NullString, error) {
+	row := q.db.QueryRowContext(ctx, getDocumentCallbackURL, id)
+	var callback_url sql.NullString
+	err := row.Scan(&callback_url)
+	return callback_url, err
 }
 
 const updateDocumentStatus = `-- name: UpdateDocumentStatus :one
 UPDATE documents
 SET status = $3, updated_at = now()
 WHERE id = $1 AND tenant_id = $2
-RETURNING id, tenant_id, title, s3_key_original, s3_key_current, current_version, status, metadata, created_at, updated_at
+RETURNING id, tenant_id, title, s3_key_original, s3_key_current, current_version, status, metadata, created_at, updated_at, callback_url
 `
 
 type UpdateDocumentStatusParams struct {
@@ -144,6 +159,7 @@ func (q *Queries) UpdateDocumentStatus(ctx context.Context, arg UpdateDocumentSt
 		&i.Metadata,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.CallbackUrl,
 	)
 	return i, err
 }
@@ -152,7 +168,7 @@ const updateDocumentVersion = `-- name: UpdateDocumentVersion :one
 UPDATE documents
 SET s3_key_current = $3, current_version = $4, status = $5, updated_at = now()
 WHERE id = $1 AND tenant_id = $2
-RETURNING id, tenant_id, title, s3_key_original, s3_key_current, current_version, status, metadata, created_at, updated_at
+RETURNING id, tenant_id, title, s3_key_original, s3_key_current, current_version, status, metadata, created_at, updated_at, callback_url
 `
 
 type UpdateDocumentVersionParams struct {
@@ -183,6 +199,7 @@ func (q *Queries) UpdateDocumentVersion(ctx context.Context, arg UpdateDocumentV
 		&i.Metadata,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.CallbackUrl,
 	)
 	return i, err
 }

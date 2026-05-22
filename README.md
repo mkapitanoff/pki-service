@@ -66,3 +66,47 @@ RabbitMQ UI: `http://localhost:15672` (guest / guest)
 ## Стек
 
 Go 1.22 · Chi · PostgreSQL 15 · Redis 7 · RabbitMQ 3.12 · NCANode · MinIO/S3 · pdfcpu
+
+## Интеграция
+
+### Загрузка документа
+
+```javascript
+const formData = new FormData();
+formData.append('file', pdfBlob, 'document.pdf');
+formData.append('title', 'Договор №123');
+formData.append('callback_url', 'https://your-app.com/documents/123/signed');
+
+const response = await fetch('https://pki-service.darch.pro/api/v1/upload', {
+  method: 'POST',
+  headers: { 'Authorization': 'Bearer YOUR_API_KEY' },
+  body: formData
+});
+const { data } = await response.json();
+// data.sign_url — ссылка на страницу подписания
+// Редирект пользователя на страницу подписания:
+window.location.href = `https://pki-service.darch.pro/document/${data.document_id}`;
+```
+
+После подписания пользователь автоматически перенаправляется на:
+`https://your-app.com/documents/123/signed?document_id=<uuid>&status=signed`
+
+### Webhook payload (POST на ваш URL)
+
+```json
+{
+  "event": "document.signed",
+  "document_id": "uuid",
+  "signature_id": "uuid",
+  "signer_name": "ИВАНОВ ИВАН",
+  "signed_at": "2026-05-22T10:00:00Z",
+  "download_url": "https://pki-service.darch.pro/api/v1/documents/{id}/file"
+}
+```
+
+### Скачать подписанный PDF
+
+```
+GET https://pki-service.darch.pro/api/v1/documents/{document_id}/file
+Authorization: Bearer YOUR_API_KEY
+```

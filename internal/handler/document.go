@@ -69,6 +69,7 @@ func (h *DocumentHandler) HandleUploadDocument(w http.ResponseWriter, r *http.Re
 	}
 
 	title := r.FormValue("title")
+	callbackURL := r.FormValue("callback_url")
 
 	// SHA-256 of the original PDF (returned to caller for CMS signing).
 	sum := sha256.Sum256(pdfBytes)
@@ -90,6 +91,7 @@ func (h *DocumentHandler) HandleUploadDocument(w http.ResponseWriter, r *http.Re
 		S3KeyCurrent:   s3Key,
 		CurrentVersion: 0,
 		Status:         repository.DocStatusDraft,
+		CallbackUrl:    toNullString(callbackURL),
 	})
 	if err != nil {
 		respondError(w, apperr.ErrInternal.WithCause(fmt.Errorf("create document: %w", err)))
@@ -98,11 +100,12 @@ func (h *DocumentHandler) HandleUploadDocument(w http.ResponseWriter, r *http.Re
 
 	respondJSON(w, http.StatusCreated, map[string]any{
 		"data": map[string]any{
-			"document_id": doc.ID,
-			"title":       doc.Title.String,
-			"sha256_hash": docSHA256,
-			"status":      doc.Status,
-			"sign_url":    fmt.Sprintf("%s/verify/%s", h.verifyBaseURL, doc.ID),
+			"document_id":  doc.ID,
+			"title":        doc.Title.String,
+			"sha256_hash":  docSHA256,
+			"status":       doc.Status,
+			"sign_url":     fmt.Sprintf("%s/document/%s", h.verifyBaseURL, doc.ID),
+			"callback_url": doc.CallbackUrl.String,
 		},
 	})
 }

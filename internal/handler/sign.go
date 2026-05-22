@@ -77,14 +77,16 @@ func (h *SignHandler) HandleSign(w http.ResponseWriter, r *http.Request) {
 			"signature_id":        result.SignatureID,
 			"signed_document_url": result.SignedDocumentURL,
 			"signature":           result.Signature,
+			"redirect_url":        result.RedirectURL,
 		},
 	})
 }
 
 type createDocumentRequest struct {
-	S3Key    string          `json:"s3_key"`
-	Title    string          `json:"title"`
-	Metadata json.RawMessage `json:"metadata"`
+	S3Key       string          `json:"s3_key"`
+	Title       string          `json:"title"`
+	Metadata    json.RawMessage `json:"metadata"`
+	CallbackURL string          `json:"callback_url"`
 }
 
 func (h *SignHandler) HandleCreateDocument(w http.ResponseWriter, r *http.Request) {
@@ -113,6 +115,7 @@ func (h *SignHandler) HandleCreateDocument(w http.ResponseWriter, r *http.Reques
 		CurrentVersion: 0,
 		Status:         repository.DocStatusDraft,
 		Metadata:       meta,
+		CallbackUrl:    toNullString(req.CallbackURL),
 	})
 	if err != nil {
 		respondError(w, apperr.ErrInternal.WithCause(err))
