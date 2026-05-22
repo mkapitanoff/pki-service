@@ -76,56 +76,74 @@ func formatDate(t time.Time) string {
 
 // ── Font management ──────────────────────────────────────────────────────────
 
-var (
-	fontOnce        sync.Once
-	activeFontName  = "Helvetica" // built-in pdfcpu fallback (Latin-only, won't crash)
-	cyrillicEnabled = false       // true when a Unicode font with Cyrillic was loaded
-)
+var initFontsOnce sync.Once
 
-// ensureFont copies the first available Unicode/Cyrillic TTF into pdfcpu's
-// font dir (~/.config/pdfcpu/fonts) under the name ArialUnicodeMS.ttf,
-// installs it, and activates it. Falls back to Helvetica if nothing found.
-func ensureFont() {
-	fontOnce.Do(func() {
-		homeDir, _ := os.UserHomeDir()
-		fontDir := filepath.Join(homeDir, ".config", "pdfcpu", "fonts")
-		_ = os.MkdirAll(fontDir, 0o755)
-		font.UserFontDir = fontDir
+// activeFontName is the pdfcpu font name used for all text stamps.
+// "Helvetica" is the built-in Latin-only fallback.
+var activeFontName = "Helvetica"
 
-		// Already installed by Dockerfile or previous run.
-		destPath := filepath.Join(fontDir, "ArialUnicodeMS.ttf")
+// cyrillicEnabled is true when a Unicode font with Cyrillic glyphs was loaded.
+var cyrillicEnabled = false
 
-		candidates := []string{
-			destPath,                           // pre-installed in Docker image
-			"/Library/Fonts/Arial Unicode.ttf", // macOS
+// copyFile copies src to dst byte-for-byte.
+func copyFile(src, dst string) error {
+	data, err := os.ReadFile(src)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(dst, data, 0o644)
+}
+
+// initPDFCPUFonts sets font.UserFontDir, converts TTF → GOB if needed,
+// and calls font.LoadUserFonts() so pdfcpu can use the Cyrillic font.
+// Runs exactly once per process.
+func initPDFCPUFonts() {
+	initFontsOnce.Do(func() {
+		// Docker image pre-installs ArialUnicodeMS.ttf here.
+		fontDir := "/root/.config/pdfcpu/fonts"
+		if _, err := os.Stat(fontDir); os.IsNotExist(err) {
+			// macOS / local dev fallback.
+			homeDir, _ := os.UserHomeDir()
+			fontDir = filepath.Join(homeDir, ".config", "pdfcpu", "fonts")
+			_ = os.MkdirAll(fontDir, 0o755)
+			macFont := "/Library/Fonts/Arial Unicode.ttf"
+			if _, err := os.Stat(macFont); err == nil {
+				dest := filepath.Join(fontDir, "ArialUnicodeMS.ttf")
+				_ = copyFile(macFont, dest)
+			}
 		}
 
-		for _, src := range candidates {
-			if _, err := os.Stat(src); err != nil {
-				continue
+		font.UserFontDir = fontDir
+
+		// pdfcpu stores parsed font data as .gob files.
+		// Convert TTF → GOB if the GOB is not yet present.
+		ttfPath := filepath.Join(fontDir, "ArialUnicodeMS.ttf")
+		if _, err := os.Stat(ttfPath); err == nil {
+			if err := font.InstallTrueTypeFont(fontDir, ttfPath); err != nil {
+				fmt.Printf("[pdf] InstallTrueTypeFont error: %v\n", err)
 			}
-			// Copy to destPath if it's a different source file.
-			if src != destPath {
-				data, err := os.ReadFile(src)
-				if err != nil {
-					continue
-				}
-				if err := os.WriteFile(destPath, data, 0o644); err != nil {
-					continue
-				}
-			}
-			// InstallFonts expects a directory path.
-			if err := api.InstallFonts([]string{fontDir}); err != nil {
-				continue
-			}
-			font.LoadUserFonts()
-			if names := font.UserFontNames(); len(names) > 0 {
-				activeFontName = "ArialUnicodeMS"
+		}
+
+		if err := font.LoadUserFonts(); err != nil {
+			fmt.Printf("[pdf] LoadUserFonts error: %v\n", err)
+			return
+		}
+
+		names := font.UserFontNames()
+		fmt.Printf("[pdf] LoadUserFonts OK, fonts: %v\n", names)
+
+		// Pick the first Arial-like or any available user font.
+		for _, n := range names {
+			if strings.Contains(strings.ToLower(n), "arial") {
+				activeFontName = n
 				cyrillicEnabled = true
 				return
 			}
 		}
-		// No TTF found — Helvetica built-in, no Cyrillic.
+		if len(names) > 0 {
+			activeFontName = names[0]
+			cyrillicEnabled = true
+		}
 	})
 }
 
@@ -252,7 +270,7 @@ const (
 // CLAUDE.md reference layout: QR on the left, text fields on the right,
 // coloured headers, Cyrillic via ArialUnicodeMS (or Courier fallback).
 func GenerateSignPage(signatures []SignatureInfo) ([]byte, error) {
-	ensureFont()
+	initPDFCPUFonts()
 
 	conf := model.NewDefaultConfiguration()
 

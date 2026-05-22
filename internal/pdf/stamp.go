@@ -36,7 +36,7 @@ func AddQRStamps(pdfBytes []byte, stamps []QRStamp) ([]byte, error) {
 		return cp, nil
 	}
 
-	ensureFont()
+	initPDFCPUFonts()
 
 	conf := model.NewDefaultConfiguration()
 
