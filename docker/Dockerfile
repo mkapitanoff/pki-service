@@ -16,10 +16,10 @@ RUN CGO_ENABLED=0 GOOS=linux go build -o /out/pki-seed ./cmd/seed/main.go
 # ── Stage 2: Runtime ──────────────────────────────────────────────────────────
 FROM alpine:latest
 
-RUN apk add --no-cache ca-certificates curl tzdata font-noto fontconfig && \
-    mkdir -p /root/.config/pdfcpu/fonts && \
-    find /usr/share/fonts -name "NotoSans-Regular.ttf" -exec cp {} /root/.config/pdfcpu/fonts/ArialUnicodeMS.ttf \; && \
-    fc-cache -fv
+RUN apk add --no-cache ca-certificates curl tzdata fontconfig && fc-cache -fv
+
+RUN mkdir -p /root/.config/pdfcpu/fonts
+COPY docker/fonts/ArialUnicodeMS.ttf /root/.config/pdfcpu/fonts/ArialUnicodeMS.ttf
 
 WORKDIR /app
 

@@ -96,12 +96,7 @@ func ensureFont() {
 		destPath := filepath.Join(fontDir, "ArialUnicodeMS.ttf")
 
 		candidates := []string{
-			destPath, // pre-installed in Docker image
-			"/usr/share/fonts/noto/NotoSans-Regular.ttf",
-			"/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",
-			"/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-			"/usr/share/fonts/dejavu/DejaVuSans.ttf",
-			"/usr/share/fonts/TTF/DejaVuSans.ttf",
+			destPath,                           // pre-installed in Docker image
 			"/Library/Fonts/Arial Unicode.ttf", // macOS
 		}
 
@@ -109,7 +104,7 @@ func ensureFont() {
 			if _, err := os.Stat(src); err != nil {
 				continue
 			}
-			// Copy to destPath under the name ArialUnicodeMS.ttf if needed.
+			// Copy to destPath if it's a different source file.
 			if src != destPath {
 				data, err := os.ReadFile(src)
 				if err != nil {
