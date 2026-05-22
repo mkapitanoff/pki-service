@@ -89,10 +89,13 @@ export function SignModal({
       setTimeout(() => {
         setOpen(false);
         reset();
-        onSigned();
+        const redirectUrl = result.redirect_url;
+        if (redirectUrl) {
+          window.location.href = redirectUrl;
+        } else {
+          onSigned();
+        }
       }, 1200);
-
-      void result;
     } catch (e) {
       setError(e instanceof Error ? e.message : "Ошибка подписания");
       setStep("error");

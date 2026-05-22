@@ -91,6 +91,7 @@ export type SignResult = {
   signature_id: string;
   signed_document_url: string;
   signature: Signature;
+  redirect_url?: string;
 };
 
 export type DemoUploadResult = {
