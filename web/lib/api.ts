@@ -1,4 +1,4 @@
-export const API_BASE = "http://localhost:8080";
+export const API_BASE = process.env.NEXT_PUBLIC_API_BASE || "http://localhost:8080";
 const API_KEY = "test-api-key-12345";
 const TOKEN_KEY = "pki_token";
 
