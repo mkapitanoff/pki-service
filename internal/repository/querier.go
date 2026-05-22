@@ -11,6 +11,7 @@ import (
 )
 
 type Querier interface {
+	CreateAPIKey(ctx context.Context, arg CreateAPIKeyParams) (ApiKey, error)
 	CreateAuditLog(ctx context.Context, arg CreateAuditLogParams) error
 	CreateAuthToken(ctx context.Context, arg CreateAuthTokenParams) (AuthToken, error)
 	CreateDocument(ctx context.Context, arg CreateDocumentParams) (Document, error)
@@ -20,6 +21,7 @@ type Querier interface {
 	CreateTenant(ctx context.Context, arg CreateTenantParams) (Tenant, error)
 	CreateUser(ctx context.Context, arg CreateUserParams) (User, error)
 	CreateWebhookDelivery(ctx context.Context, arg CreateWebhookDeliveryParams) (WebhookDelivery, error)
+	DeactivateAPIKey(ctx context.Context, arg DeactivateAPIKeyParams) error
 	DeleteAuthToken(ctx context.Context, tokenHash string) error
 	DeleteExpiredTokens(ctx context.Context) error
 	GetAPIKeyByHash(ctx context.Context, keyHash string) (ApiKey, error)
@@ -34,10 +36,14 @@ type Querier interface {
 	GetWebhookByID(ctx context.Context, id uuid.UUID) (Webhook, error)
 	GetWebhookDeliveryByID(ctx context.Context, id uuid.UUID) (WebhookDelivery, error)
 	GetWebhooksByTenantAndEvent(ctx context.Context, arg GetWebhooksByTenantAndEventParams) ([]Webhook, error)
+	ListAPIKeysByTenant(ctx context.Context, tenantID uuid.UUID) ([]ApiKey, error)
+	ListTenantsWithKeyCount(ctx context.Context) ([]ListTenantsWithKeyCountRow, error)
+	ListUsers(ctx context.Context) ([]User, error)
 	UpdateAPIKeyLastUsed(ctx context.Context, id uuid.UUID) error
 	UpdateDocumentStatus(ctx context.Context, arg UpdateDocumentStatusParams) (Document, error)
 	UpdateDocumentVersion(ctx context.Context, arg UpdateDocumentVersionParams) (Document, error)
 	UpdateUserLastLogin(ctx context.Context, id uuid.UUID) error
+	UpdateUserRole(ctx context.Context, arg UpdateUserRoleParams) (User, error)
 	UpdateWebhookDeliveryFailed(ctx context.Context, arg UpdateWebhookDeliveryFailedParams) error
 	UpdateWebhookDeliverySuccess(ctx context.Context, id uuid.UUID) error
 }

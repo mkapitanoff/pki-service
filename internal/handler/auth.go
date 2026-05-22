@@ -14,6 +14,7 @@ import (
 )
 
 const userIDKey ctxKey = "user_id"
+const userRoleKey ctxKey = "user_role"
 
 // JWTAuth validates Bearer JWT and injects Claims into the request context.
 func JWTAuth(svc *authsvc.AuthService) func(http.Handler) http.Handler {
@@ -36,6 +37,7 @@ func JWTAuth(svc *authsvc.AuthService) func(http.Handler) http.Handler {
 			ctx := r.Context()
 			ctx = WithTenant(ctx, claims.TenantID)
 			ctx = context.WithValue(ctx, userIDKey, claims.UserID)
+			ctx = context.WithValue(ctx, userRoleKey, claims.Role)
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}

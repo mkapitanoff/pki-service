@@ -7,6 +7,7 @@ package repository
 
 import (
 	"context"
+	"database/sql"
 	"time"
 
 	"github.com/google/uuid"
@@ -151,6 +152,43 @@ func (q *Queries) GetUserByID(ctx context.Context, id uuid.UUID) (User, error) {
 	return i, err
 }
 
+const listUsers = `-- name: ListUsers :many
+SELECT id, email, password_hash, name, tenant_id, role, is_active, created_at, last_login_at FROM users ORDER BY created_at DESC
+`
+
+func (q *Queries) ListUsers(ctx context.Context) ([]User, error) {
+	rows, err := q.db.QueryContext(ctx, listUsers)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []User
+	for rows.Next() {
+		var i User
+		if err := rows.Scan(
+			&i.ID,
+			&i.Email,
+			&i.PasswordHash,
+			&i.Name,
+			&i.TenantID,
+			&i.Role,
+			&i.IsActive,
+			&i.CreatedAt,
+			&i.LastLoginAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const updateUserLastLogin = `-- name: UpdateUserLastLogin :exec
 UPDATE users SET last_login_at = now() WHERE id = $1
 `
@@ -158,4 +196,31 @@ UPDATE users SET last_login_at = now() WHERE id = $1
 func (q *Queries) UpdateUserLastLogin(ctx context.Context, id uuid.UUID) error {
 	_, err := q.db.ExecContext(ctx, updateUserLastLogin, id)
 	return err
+}
+
+const updateUserRole = `-- name: UpdateUserRole :one
+UPDATE users SET role = $1, is_active = $2 WHERE id = $3 RETURNING id, email, password_hash, name, tenant_id, role, is_active, created_at, last_login_at
+`
+
+type UpdateUserRoleParams struct {
+	Role     string       `json:"role"`
+	IsActive sql.NullBool `json:"is_active"`
+	ID       uuid.UUID    `json:"id"`
+}
+
+func (q *Queries) UpdateUserRole(ctx context.Context, arg UpdateUserRoleParams) (User, error) {
+	row := q.db.QueryRowContext(ctx, updateUserRole, arg.Role, arg.IsActive, arg.ID)
+	var i User
+	err := row.Scan(
+		&i.ID,
+		&i.Email,
+		&i.PasswordHash,
+		&i.Name,
+		&i.TenantID,
+		&i.Role,
+		&i.IsActive,
+		&i.CreatedAt,
+		&i.LastLoginAt,
+	)
+	return i, err
 }

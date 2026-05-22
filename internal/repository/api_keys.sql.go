@@ -7,9 +7,59 @@ package repository
 
 import (
 	"context"
+	"database/sql"
 
 	"github.com/google/uuid"
 )
+
+const createAPIKey = `-- name: CreateAPIKey :one
+INSERT INTO api_keys (tenant_id, key_hash, label, expires_at)
+VALUES ($1, $2, $3, $4)
+RETURNING id, tenant_id, key_hash, label, is_active, last_used_at, expires_at, created_at
+`
+
+type CreateAPIKeyParams struct {
+	TenantID  uuid.UUID    `json:"tenant_id"`
+	KeyHash   string       `json:"key_hash"`
+	Label     string       `json:"label"`
+	ExpiresAt sql.NullTime `json:"expires_at"`
+}
+
+func (q *Queries) CreateAPIKey(ctx context.Context, arg CreateAPIKeyParams) (ApiKey, error) {
+	row := q.db.QueryRowContext(ctx, createAPIKey,
+		arg.TenantID,
+		arg.KeyHash,
+		arg.Label,
+		arg.ExpiresAt,
+	)
+	var i ApiKey
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.KeyHash,
+		&i.Label,
+		&i.IsActive,
+		&i.LastUsedAt,
+		&i.ExpiresAt,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const deactivateAPIKey = `-- name: DeactivateAPIKey :exec
+UPDATE api_keys SET is_active = false
+WHERE id = $1 AND tenant_id = $2
+`
+
+type DeactivateAPIKeyParams struct {
+	ID       uuid.UUID `json:"id"`
+	TenantID uuid.UUID `json:"tenant_id"`
+}
+
+func (q *Queries) DeactivateAPIKey(ctx context.Context, arg DeactivateAPIKeyParams) error {
+	_, err := q.db.ExecContext(ctx, deactivateAPIKey, arg.ID, arg.TenantID)
+	return err
+}
 
 const getAPIKeyByHash = `-- name: GetAPIKeyByHash :one
 SELECT id, tenant_id, key_hash, label, is_active, last_used_at, expires_at, created_at FROM api_keys
@@ -30,6 +80,44 @@ func (q *Queries) GetAPIKeyByHash(ctx context.Context, keyHash string) (ApiKey, 
 		&i.CreatedAt,
 	)
 	return i, err
+}
+
+const listAPIKeysByTenant = `-- name: ListAPIKeysByTenant :many
+SELECT id, tenant_id, key_hash, label, is_active, last_used_at, expires_at, created_at FROM api_keys
+WHERE tenant_id = $1
+ORDER BY created_at DESC
+`
+
+func (q *Queries) ListAPIKeysByTenant(ctx context.Context, tenantID uuid.UUID) ([]ApiKey, error) {
+	rows, err := q.db.QueryContext(ctx, listAPIKeysByTenant, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ApiKey
+	for rows.Next() {
+		var i ApiKey
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.KeyHash,
+			&i.Label,
+			&i.IsActive,
+			&i.LastUsedAt,
+			&i.ExpiresAt,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const updateAPIKeyLastUsed = `-- name: UpdateAPIKeyLastUsed :exec

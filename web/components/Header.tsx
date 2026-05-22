@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { LogOut, LogIn } from "lucide-react";
+import { LogOut, LogIn, ShieldCheck } from "lucide-react";
 import { me, logout, getAuthToken, type User } from "@/lib/api";
 
 export default function Header() {
@@ -45,6 +45,15 @@ export default function Header() {
               <span className="text-xs text-zinc-400 font-medium bg-zinc-100 px-2 py-0.5 rounded-full hidden sm:block">
                 {user.role}
               </span>
+              {user.role === "admin" && (
+                <Link
+                  href="/admin"
+                  className="flex items-center gap-1.5 text-sm text-[#0070f3] hover:underline"
+                >
+                  <ShieldCheck className="w-4 h-4" />
+                  <span className="hidden sm:inline">Админ</span>
+                </Link>
+              )}
               <button
                 onClick={handleLogout}
                 className="flex items-center gap-1.5 text-sm text-zinc-500 hover:text-[#d63031] transition-colors"

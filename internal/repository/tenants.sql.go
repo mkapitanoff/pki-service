@@ -7,6 +7,7 @@ package repository
 
 import (
 	"context"
+	"time"
 
 	"github.com/google/uuid"
 )
@@ -49,4 +50,52 @@ func (q *Queries) GetTenant(ctx context.Context, id uuid.UUID) (Tenant, error) {
 		&i.CreatedAt,
 	)
 	return i, err
+}
+
+const listTenantsWithKeyCount = `-- name: ListTenantsWithKeyCount :many
+SELECT t.id, t.name, t.type, t.is_active, t.created_at,
+       COUNT(k.id) AS api_keys_count
+FROM tenants t
+LEFT JOIN api_keys k ON k.tenant_id = t.id
+GROUP BY t.id, t.name, t.type, t.is_active, t.created_at
+ORDER BY t.created_at DESC
+`
+
+type ListTenantsWithKeyCountRow struct {
+	ID           uuid.UUID  `json:"id"`
+	Name         string     `json:"name"`
+	Type         TenantType `json:"type"`
+	IsActive     bool       `json:"is_active"`
+	CreatedAt    time.Time  `json:"created_at"`
+	ApiKeysCount int64      `json:"api_keys_count"`
+}
+
+func (q *Queries) ListTenantsWithKeyCount(ctx context.Context) ([]ListTenantsWithKeyCountRow, error) {
+	rows, err := q.db.QueryContext(ctx, listTenantsWithKeyCount)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListTenantsWithKeyCountRow
+	for rows.Next() {
+		var i ListTenantsWithKeyCountRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.Type,
+			&i.IsActive,
+			&i.CreatedAt,
+			&i.ApiKeysCount,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }

@@ -206,3 +206,96 @@ export async function demoSign(
   );
   return handleResponse(res);
 }
+
+// ---- Admin API ----
+
+export type Tenant = {
+  id: string;
+  name: string;
+  type: string;
+  is_active: boolean;
+  created_at: string;
+  api_keys_count: number;
+};
+
+export type ApiKey = {
+  id: string;
+  tenant_id: string;
+  label: string;
+  is_active: boolean;
+  last_used_at: { Time: string; Valid: boolean } | null;
+  expires_at: { Time: string; Valid: boolean } | null;
+  created_at: string;
+  key?: string; // only present on creation
+};
+
+export type AdminUser = {
+  id: string;
+  email: string;
+  name: string;
+  role: string;
+  tenant_id: { UUID: string; Valid: boolean } | null;
+  is_active: { Bool: boolean; Valid: boolean } | null;
+  created_at: { Time: string; Valid: boolean } | null;
+  last_login_at: { Time: string; Valid: boolean } | null;
+};
+
+export async function adminListTenants(): Promise<Tenant[]> {
+  const res = await fetch(`${API_BASE}/admin/tenants`, { headers: authHeaders() });
+  return handleResponse(res);
+}
+
+export async function adminCreateTenant(name: string, type: string): Promise<Tenant> {
+  const res = await fetch(`${API_BASE}/admin/tenants`, {
+    method: "POST",
+    headers: authHeaders(),
+    body: JSON.stringify({ name, type }),
+  });
+  return handleResponse(res);
+}
+
+export async function adminListKeys(tenantId: string): Promise<ApiKey[]> {
+  const res = await fetch(`${API_BASE}/admin/tenants/${tenantId}/keys`, {
+    headers: authHeaders(),
+  });
+  return handleResponse(res);
+}
+
+export async function adminCreateKey(
+  tenantId: string,
+  label: string,
+  expiresAt?: string
+): Promise<ApiKey & { key: string }> {
+  const res = await fetch(`${API_BASE}/admin/tenants/${tenantId}/keys`, {
+    method: "POST",
+    headers: authHeaders(),
+    body: JSON.stringify({ label, expires_at: expiresAt ?? null }),
+  });
+  return handleResponse(res);
+}
+
+export async function adminDeactivateKey(tenantId: string, keyId: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/admin/tenants/${tenantId}/keys/${keyId}`, {
+    method: "DELETE",
+    headers: authHeaders(),
+  });
+  return handleResponse(res);
+}
+
+export async function adminListUsers(): Promise<AdminUser[]> {
+  const res = await fetch(`${API_BASE}/admin/users`, { headers: authHeaders() });
+  return handleResponse(res);
+}
+
+export async function adminUpdateUser(
+  userId: string,
+  role: string,
+  isActive: boolean
+): Promise<AdminUser> {
+  const res = await fetch(`${API_BASE}/admin/users/${userId}`, {
+    method: "PATCH",
+    headers: authHeaders(),
+    body: JSON.stringify({ role, is_active: isActive }),
+  });
+  return handleResponse(res);
+}

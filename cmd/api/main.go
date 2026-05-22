@@ -75,6 +75,7 @@ func main() {
 	verifyHandler := handler.NewVerifyHandler(queries)
 	demoHandler := handler.NewDemoHandler(queries, store)
 	documentHandler := handler.NewDocumentHandler(queries, store, cfg.App.VerifyBaseURL)
+	adminHandler := handler.NewAdminHandler(queries)
 
 	r := chi.NewRouter()
 
@@ -82,7 +83,7 @@ func main() {
 	r.Use(func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Access-Control-Allow-Origin", "http://localhost:3000")
-			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
+			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, DELETE, PATCH, OPTIONS")
 			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
 			if r.Method == http.MethodOptions {
 				w.WriteHeader(http.StatusNoContent)
@@ -116,6 +117,19 @@ func main() {
 		protected.Use(jwtMw)
 		protected.Get("/auth/me", authHandler.HandleMe)
 		protected.Post("/auth/logout", authHandler.HandleLogout)
+	})
+
+	// Admin routes — require JWT + admin role.
+	r.Group(func(admin chi.Router) {
+		admin.Use(jwtMw)
+		admin.Use(handler.RequireAdmin)
+		admin.Get("/admin/tenants", adminHandler.HandleListTenants)
+		admin.Post("/admin/tenants", adminHandler.HandleCreateTenant)
+		admin.Get("/admin/tenants/{tenant_id}/keys", adminHandler.HandleListKeys)
+		admin.Post("/admin/tenants/{tenant_id}/keys", adminHandler.HandleCreateKey)
+		admin.Delete("/admin/tenants/{tenant_id}/keys/{key_id}", adminHandler.HandleDeactivateKey)
+		admin.Get("/admin/users", adminHandler.HandleListUsers)
+		admin.Patch("/admin/users/{user_id}", adminHandler.HandleUpdateUser)
 	})
 
 	// Demo routes — no auth, for frontend testing only.
