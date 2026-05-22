@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { LogOut, LogIn, ShieldCheck } from "lucide-react";
-import { me, logout, getAuthToken, type User } from "@/lib/api";
+import { me, logout, getAuthToken, clearAuthToken, type User } from "@/lib/api";
 
 export default function Header() {
   const router = useRouter();
@@ -12,15 +12,36 @@ export default function Header() {
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
-    const token = getAuthToken();
-    if (!token) {
+    const loadUser = async () => {
+      const token = getAuthToken();
+      if (!token) {
+        setUser(null);
+        setReady(true);
+        return;
+      }
+      try {
+        const u = await me();
+        setUser(u);
+      } catch {
+        clearAuthToken();
+        setUser(null);
+      }
       setReady(true);
-      return;
-    }
-    me()
-      .then((u) => setUser(u))
-      .catch(() => setUser(null))
-      .finally(() => setReady(true));
+    };
+
+    loadUser();
+
+    // Обновлять при изменении токена в localStorage (cross-tab и после логина)
+    const handleStorage = () => loadUser();
+    window.addEventListener("storage", handleStorage);
+
+    // Обновлять при возврате на вкладку
+    window.addEventListener("focus", loadUser);
+
+    return () => {
+      window.removeEventListener("storage", handleStorage);
+      window.removeEventListener("focus", loadUser);
+    };
   }, []);
 
   const handleLogout = async () => {

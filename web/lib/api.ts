@@ -36,6 +36,25 @@ async function handleResponse<T>(res: Response): Promise<T> {
   return (json.data ?? json) as T;
 }
 
+// ---- apiFetch: централизованный fetch с JWT токеном ----
+
+async function apiFetch<T = unknown>(path: string, options: RequestInit = {}): Promise<T> {
+  const token = getAuthToken();
+  const res = await fetch(`${API_BASE}${path}`, {
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...((options.headers as Record<string, string>) || {}),
+    },
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(JSON.stringify(err));
+  }
+  return res.json() as Promise<T>;
+}
+
 // ---- Types ----
 
 export type User = {
@@ -242,24 +261,18 @@ export type AdminUser = {
 };
 
 export async function adminListTenants(): Promise<Tenant[]> {
-  const res = await fetch(`${API_BASE}/admin/tenants`, { headers: authHeaders() });
-  return handleResponse(res);
+  return apiFetch("/admin/tenants");
 }
 
 export async function adminCreateTenant(name: string, type: string): Promise<Tenant> {
-  const res = await fetch(`${API_BASE}/admin/tenants`, {
+  return apiFetch("/admin/tenants", {
     method: "POST",
-    headers: authHeaders(),
     body: JSON.stringify({ name, type }),
   });
-  return handleResponse(res);
 }
 
 export async function adminListKeys(tenantId: string): Promise<ApiKey[]> {
-  const res = await fetch(`${API_BASE}/admin/tenants/${tenantId}/keys`, {
-    headers: authHeaders(),
-  });
-  return handleResponse(res);
+  return apiFetch(`/admin/tenants/${tenantId}/keys`);
 }
 
 export async function adminCreateKey(
@@ -267,25 +280,18 @@ export async function adminCreateKey(
   label: string,
   expiresAt?: string
 ): Promise<ApiKey & { key: string }> {
-  const res = await fetch(`${API_BASE}/admin/tenants/${tenantId}/keys`, {
+  return apiFetch(`/admin/tenants/${tenantId}/keys`, {
     method: "POST",
-    headers: authHeaders(),
     body: JSON.stringify({ label, expires_at: expiresAt ?? null }),
   });
-  return handleResponse(res);
 }
 
 export async function adminDeactivateKey(tenantId: string, keyId: string): Promise<void> {
-  const res = await fetch(`${API_BASE}/admin/tenants/${tenantId}/keys/${keyId}`, {
-    method: "DELETE",
-    headers: authHeaders(),
-  });
-  return handleResponse(res);
+  return apiFetch(`/admin/tenants/${tenantId}/keys/${keyId}`, { method: "DELETE" });
 }
 
 export async function adminListUsers(): Promise<AdminUser[]> {
-  const res = await fetch(`${API_BASE}/admin/users`, { headers: authHeaders() });
-  return handleResponse(res);
+  return apiFetch("/admin/users");
 }
 
 export async function adminUpdateUser(
@@ -293,12 +299,10 @@ export async function adminUpdateUser(
   role: string,
   isActive: boolean
 ): Promise<AdminUser> {
-  const res = await fetch(`${API_BASE}/admin/users/${userId}`, {
+  return apiFetch(`/admin/users/${userId}`, {
     method: "PATCH",
-    headers: authHeaders(),
     body: JSON.stringify({ role, is_active: isActive }),
   });
-  return handleResponse(res);
 }
 
 export async function adminCreateUser(
@@ -308,18 +312,12 @@ export async function adminCreateUser(
   role: string,
   tenantId?: string
 ): Promise<AdminUser> {
-  const res = await fetch(`${API_BASE}/admin/users`, {
+  return apiFetch("/admin/users", {
     method: "POST",
-    headers: authHeaders(),
     body: JSON.stringify({ email, password, name, role, tenant_id: tenantId ?? "" }),
   });
-  return handleResponse(res);
 }
 
 export async function adminDeleteUser(userId: string): Promise<void> {
-  const res = await fetch(`${API_BASE}/admin/users/${userId}`, {
-    method: "DELETE",
-    headers: authHeaders(),
-  });
-  return handleResponse(res);
+  return apiFetch(`/admin/users/${userId}`, { method: "DELETE" });
 }

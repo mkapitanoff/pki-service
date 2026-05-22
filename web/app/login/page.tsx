@@ -20,7 +20,8 @@ export default function LoginPage() {
     try {
       const { token } = await login(email, password);
       setAuthToken(token);
-      router.replace("/");
+      window.dispatchEvent(new Event("storage"));
+      router.push("/");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Ошибка входа");
       setLoading(false);
