@@ -75,7 +75,7 @@ func main() {
 	verifyHandler := handler.NewVerifyHandler(queries)
 	demoHandler := handler.NewDemoHandler(queries, store)
 	documentHandler := handler.NewDocumentHandler(queries, store, cfg.App.VerifyBaseURL)
-	adminHandler := handler.NewAdminHandler(queries)
+	adminHandler := handler.NewAdminHandler(queries, authSvc)
 
 	r := chi.NewRouter()
 
@@ -129,7 +129,9 @@ func main() {
 		admin.Post("/admin/tenants/{tenant_id}/keys", adminHandler.HandleCreateKey)
 		admin.Delete("/admin/tenants/{tenant_id}/keys/{key_id}", adminHandler.HandleDeactivateKey)
 		admin.Get("/admin/users", adminHandler.HandleListUsers)
+		admin.Post("/admin/users", adminHandler.HandleCreateUser)
 		admin.Patch("/admin/users/{user_id}", adminHandler.HandleUpdateUser)
+		admin.Delete("/admin/users/{user_id}", adminHandler.HandleDeleteUser)
 	})
 
 	// Demo routes — no auth, for frontend testing only.

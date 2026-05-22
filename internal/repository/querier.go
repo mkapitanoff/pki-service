@@ -24,6 +24,7 @@ type Querier interface {
 	DeactivateAPIKey(ctx context.Context, arg DeactivateAPIKeyParams) error
 	DeleteAuthToken(ctx context.Context, tokenHash string) error
 	DeleteExpiredTokens(ctx context.Context) error
+	DeleteUser(ctx context.Context, id uuid.UUID) error
 	GetAPIKeyByHash(ctx context.Context, keyHash string) (ApiKey, error)
 	GetAuthTokenByHash(ctx context.Context, tokenHash string) (AuthToken, error)
 	GetDocument(ctx context.Context, arg GetDocumentParams) (Document, error)

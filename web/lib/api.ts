@@ -299,3 +299,26 @@ export async function adminUpdateUser(
   });
   return handleResponse(res);
 }
+
+export async function adminCreateUser(
+  email: string,
+  password: string,
+  name: string,
+  role: string,
+  tenantId?: string
+): Promise<AdminUser> {
+  const res = await fetch(`${API_BASE}/admin/users`, {
+    method: "POST",
+    headers: authHeaders(),
+    body: JSON.stringify({ email, password, name, role, tenant_id: tenantId ?? "" }),
+  });
+  return handleResponse(res);
+}
+
+export async function adminDeleteUser(userId: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/admin/users/${userId}`, {
+    method: "DELETE",
+    headers: authHeaders(),
+  });
+  return handleResponse(res);
+}

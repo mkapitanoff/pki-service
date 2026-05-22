@@ -6,12 +6,16 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
+	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
+	authsvc "github.com/mkapitanoff/pki-service/internal/auth"
 	apperr "github.com/mkapitanoff/pki-service/internal/errors"
 	"github.com/mkapitanoff/pki-service/internal/repository"
 )
@@ -31,10 +35,11 @@ func RequireAdmin(next http.Handler) http.Handler {
 // AdminHandler handles admin endpoints for tenants, API keys, and users.
 type AdminHandler struct {
 	queries *repository.Queries
+	authSvc *authsvc.AuthService
 }
 
-func NewAdminHandler(queries *repository.Queries) *AdminHandler {
-	return &AdminHandler{queries: queries}
+func NewAdminHandler(queries *repository.Queries, authSvc *authsvc.AuthService) *AdminHandler {
+	return &AdminHandler{queries: queries, authSvc: authSvc}
 }
 
 // HandleListTenants — GET /admin/tenants
@@ -90,8 +95,8 @@ func (h *AdminHandler) HandleListKeys(w http.ResponseWriter, r *http.Request) {
 }
 
 type createKeyRequest struct {
-	Label     string  `json:"label"`
-	ExpiresAt *string `json:"expires_at"` // RFC3339 or null
+	Label     string `json:"label"`
+	ExpiresAt string `json:"expires_at"` // RFC3339 or empty string
 }
 
 // HandleCreateKey — POST /admin/tenants/{tenant_id}/keys
@@ -103,8 +108,12 @@ func (h *AdminHandler) HandleCreateKey(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Debug: log raw body to diagnose parse issues.
+	bodyBytes, _ := io.ReadAll(r.Body)
+	fmt.Printf("[admin] create key body: %s\n", bodyBytes)
+
 	var req createKeyRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Label == "" {
+	if err := json.Unmarshal(bodyBytes, &req); err != nil || strings.TrimSpace(req.Label) == "" {
 		respondError(w, apperr.ErrInvalidRequest)
 		return
 	}
@@ -120,14 +129,14 @@ func (h *AdminHandler) HandleCreateKey(w http.ResponseWriter, r *http.Request) {
 	sum := sha256.Sum256([]byte(rawKey))
 	keyHash := hex.EncodeToString(sum[:])
 
+	// Gracefully handle empty or missing expires_at — store NULL.
 	var expiresAt sql.NullTime
-	if req.ExpiresAt != nil && *req.ExpiresAt != "" {
-		t, err := time.Parse(time.RFC3339, *req.ExpiresAt)
-		if err != nil {
-			respondError(w, apperr.ErrInvalidRequest)
-			return
+	if req.ExpiresAt != "" {
+		t, err := time.Parse(time.RFC3339, req.ExpiresAt)
+		if err == nil {
+			expiresAt = sql.NullTime{Time: t, Valid: true}
 		}
-		expiresAt = sql.NullTime{Time: t, Valid: true}
+		// If parse fails we silently store NULL — no 400.
 	}
 
 	key, err := h.queries.CreateAPIKey(r.Context(), repository.CreateAPIKeyParams{
@@ -230,4 +239,82 @@ func (h *AdminHandler) HandleUpdateUser(w http.ResponseWriter, r *http.Request) 
 		"role":      user.Role,
 		"is_active": user.IsActive,
 	})
+}
+
+type createUserRequest struct {
+	Email    string `json:"email"`
+	Password string `json:"password"`
+	Name     string `json:"name"`
+	Role     string `json:"role"`
+	TenantID string `json:"tenant_id"` // UUID string or empty → auto-create
+}
+
+// HandleCreateUser — POST /admin/users
+func (h *AdminHandler) HandleCreateUser(w http.ResponseWriter, r *http.Request) {
+	var req createUserRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		respondError(w, apperr.ErrInvalidRequest)
+		return
+	}
+	if req.Email == "" || req.Password == "" || req.Name == "" {
+		respondError(w, apperr.ErrInvalidRequest)
+		return
+	}
+
+	tenantID := uuid.Nil
+	if req.TenantID != "" {
+		parsed, err := uuid.Parse(req.TenantID)
+		if err != nil {
+			respondError(w, apperr.ErrInvalidRequest)
+			return
+		}
+		tenantID = parsed
+	}
+
+	role := req.Role
+	if role == "" {
+		role = "user"
+	}
+
+	user, err := h.authSvc.Register(r.Context(), req.Email, req.Password, req.Name, tenantID)
+	if err != nil {
+		respondError(w, err)
+		return
+	}
+
+	// If role is not the default "user", update it after creation.
+	if role != "user" {
+		updated, err := h.queries.UpdateUserRole(r.Context(), repository.UpdateUserRoleParams{
+			Role:     role,
+			IsActive: sql.NullBool{Bool: true, Valid: true},
+			ID:       user.ID,
+		})
+		if err != nil {
+			respondError(w, apperr.ErrInternal.WithCause(err))
+			return
+		}
+		user = &updated
+	}
+
+	respondJSON(w, http.StatusCreated, map[string]any{
+		"id":        user.ID,
+		"email":     user.Email,
+		"name":      user.Name,
+		"role":      user.Role,
+		"tenant_id": user.TenantID,
+	})
+}
+
+// HandleDeleteUser — DELETE /admin/users/{user_id}
+func (h *AdminHandler) HandleDeleteUser(w http.ResponseWriter, r *http.Request) {
+	userID, err := uuid.Parse(chi.URLParam(r, "user_id"))
+	if err != nil {
+		respondError(w, apperr.ErrInvalidRequest)
+		return
+	}
+	if err := h.queries.DeleteUser(r.Context(), userID); err != nil {
+		respondError(w, apperr.ErrInternal.WithCause(err))
+		return
+	}
+	respondJSON(w, http.StatusOK, map[string]any{"ok": true})
 }

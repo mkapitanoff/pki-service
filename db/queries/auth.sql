@@ -31,3 +31,6 @@ SELECT * FROM users ORDER BY created_at DESC;
 
 -- name: UpdateUserRole :one
 UPDATE users SET role = $1, is_active = $2 WHERE id = $3 RETURNING *;
+
+-- name: DeleteUser :exec
+DELETE FROM users WHERE id = $1;
