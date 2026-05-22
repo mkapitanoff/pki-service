@@ -51,7 +51,7 @@ func AddQRStamps(pdfBytes []byte, stamps []QRStamp) ([]byte, error) {
 
 	// Use Cyrillic label if a Unicode font was loaded, otherwise Latin fallback.
 	label := "Proverit ECP"
-	if activeFontName != "Courier" {
+	if cyrillicEnabled {
 		label = "Проверить ЭЦП"
 	}
 

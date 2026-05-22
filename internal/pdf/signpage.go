@@ -77,13 +77,14 @@ func formatDate(t time.Time) string {
 // ── Font management ──────────────────────────────────────────────────────────
 
 var (
-	fontOnce       sync.Once
-	activeFontName = "Helvetica" // built-in pdfcpu fallback (no Cyrillic, but safe)
+	fontOnce        sync.Once
+	activeFontName  = "Helvetica" // built-in pdfcpu fallback (Latin-only, won't crash)
+	cyrillicEnabled = false       // true when a Unicode font with Cyrillic was loaded
 )
 
-// ensureFont copies the first available Cyrillic TTF into pdfcpu's font dir
-// (~/.config/pdfcpu/fonts), installs it, then activates it.
-// Falls back to built-in Helvetica if no TTF is found.
+// ensureFont copies the first available Unicode/Cyrillic TTF into pdfcpu's
+// font dir (~/.config/pdfcpu/fonts) under the name ArialUnicodeMS.ttf,
+// installs it, and activates it. Falls back to Helvetica if nothing found.
 func ensureFont() {
 	fontOnce.Do(func() {
 		homeDir, _ := os.UserHomeDir()
@@ -91,11 +92,16 @@ func ensureFont() {
 		_ = os.MkdirAll(fontDir, 0o755)
 		font.UserFontDir = fontDir
 
+		// Already installed by Dockerfile or previous run.
+		destPath := filepath.Join(fontDir, "ArialUnicodeMS.ttf")
+
 		candidates := []string{
-			"/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", // Ubuntu/Debian/Alpine
-			"/usr/share/fonts/dejavu/DejaVuSans.ttf",          // Fedora
-			"/usr/share/fonts/TTF/DejaVuSans.ttf",             // Arch
-			"/usr/share/fonts/truetype/arial/Arial Unicode.ttf",
+			destPath, // pre-installed in Docker image
+			"/usr/share/fonts/noto/NotoSans-Regular.ttf",
+			"/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",
+			"/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+			"/usr/share/fonts/dejavu/DejaVuSans.ttf",
+			"/usr/share/fonts/TTF/DejaVuSans.ttf",
 			"/Library/Fonts/Arial Unicode.ttf", // macOS
 		}
 
@@ -103,14 +109,13 @@ func ensureFont() {
 			if _, err := os.Stat(src); err != nil {
 				continue
 			}
-			// Copy TTF into fontDir if not already present.
-			dst := filepath.Join(fontDir, filepath.Base(src))
-			if _, err := os.Stat(dst); err != nil {
+			// Copy to destPath under the name ArialUnicodeMS.ttf if needed.
+			if src != destPath {
 				data, err := os.ReadFile(src)
 				if err != nil {
 					continue
 				}
-				if err := os.WriteFile(dst, data, 0o644); err != nil {
+				if err := os.WriteFile(destPath, data, 0o644); err != nil {
 					continue
 				}
 			}
@@ -120,11 +125,12 @@ func ensureFont() {
 			}
 			font.LoadUserFonts()
 			if names := font.UserFontNames(); len(names) > 0 {
-				activeFontName = names[0]
+				activeFontName = "ArialUnicodeMS"
+				cyrillicEnabled = true
 				return
 			}
 		}
-		// No TTF found — keep built-in Helvetica (Latin-only, but won't crash).
+		// No TTF found — Helvetica built-in, no Cyrillic.
 	})
 }
 
