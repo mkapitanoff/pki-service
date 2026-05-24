@@ -187,13 +187,36 @@ func GenerateSignPage(signatures []SignatureInfo) ([]byte, error) {
 
 	const fontName = "Arial"
 	useCyrillic := false
-	ttf := ttfFontPath()
+
+	// Try TTF candidates in order; use the first one that exists on disk.
+	ttfCandidates := []string{
+		"/root/.config/pdfcpu/fonts/ArialUnicodeMS.ttf",
+		"/Library/Fonts/Arial Unicode.ttf",
+	}
+	if ourFontDir != "" {
+		p := filepath.Join(ourFontDir, "ArialUnicodeMS.ttf")
+		ttfCandidates = append([]string{p}, ttfCandidates...)
+	}
+
+	var ttf string
+	for _, p := range ttfCandidates {
+		if !filepath.IsAbs(p) {
+			fmt.Printf("[pdf] gofpdf: skipping relative path %q\n", p)
+			continue
+		}
+		if _, err := os.Stat(p); err == nil {
+			ttf = p
+			break
+		}
+	}
+	fmt.Printf("[pdf] gofpdf: ourFontDir=%q ttf=%q\n", ourFontDir, ttf)
+
 	if ttf != "" {
 		fpdf.AddUTF8Font(fontName, "", ttf)
 		if fpdf.Error() == nil {
 			useCyrillic = true
+			fmt.Printf("[pdf] gofpdf: AddUTF8Font OK with %s\n", ttf)
 		} else {
-			// AddUTF8Font failed — recreate a clean object and use Helvetica.
 			fmt.Printf("[pdf] gofpdf AddUTF8Font error: %v, falling back to Helvetica\n", fpdf.Error())
 			fpdf = gofpdf.New("P", "mm", "A4", "")
 			fpdf.SetMargins(10, 10, 10)
