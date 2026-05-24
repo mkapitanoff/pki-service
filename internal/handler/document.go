@@ -140,13 +140,13 @@ func (h *DocumentHandler) HandleDownloadDocument(w http.ResponseWriter, r *http.
 		return
 	}
 
-	// Draft means no signatures — nothing to download yet.
-	if doc.Status == repository.DocStatusDraft {
-		respondError(w, apperr.ErrDocumentNotFound)
-		return
+	// For draft documents serve the original PDF; for signed/partially_signed serve the current (stamped) PDF.
+	s3Key := doc.S3KeyOriginal
+	if doc.Status == repository.DocStatusSigned || doc.Status == repository.DocStatusPartiallySigned {
+		s3Key = doc.S3KeyCurrent
 	}
 
-	data, err := h.storage.DownloadFile(r.Context(), doc.S3KeyCurrent)
+	data, err := h.storage.DownloadFile(r.Context(), s3Key)
 	if err != nil {
 		if stderrors.Is(err, storage.ErrNotFound) {
 			respondError(w, apperr.ErrDocumentNotFound)
