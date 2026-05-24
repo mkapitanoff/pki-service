@@ -74,7 +74,7 @@ func main() {
 	signHandler := handler.NewSignHandler(signSvc, queries)
 	verifyHandler := handler.NewVerifyHandler(queries)
 	demoHandler := handler.NewDemoHandler(queries, store)
-	documentHandler := handler.NewDocumentHandler(queries, store, cfg.App.VerifyBaseURL)
+	documentHandler := handler.NewDocumentHandler(queries, store, cfg.App.VerifyBaseURL, ncClient)
 	adminHandler := handler.NewAdminHandler(queries, authSvc)
 
 	r := chi.NewRouter()

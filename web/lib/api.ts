@@ -114,11 +114,19 @@ export type SignResult = {
   redirect_url?: string;
 };
 
+export type ExistingSignatureInfo = {
+  signer_name: string;
+  signer_iin: string;
+  signed_at: string;
+  valid: boolean;
+};
+
 export type DemoUploadResult = {
   document_id: string;
   title: string;
   sha256_hash: string;
   status: string;
+  existing_signatures?: ExistingSignatureInfo[];
 };
 
 // ---- Auth API ----

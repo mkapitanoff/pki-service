@@ -4,7 +4,7 @@ import { useState, useRef, DragEvent, ChangeEvent } from "react";
 import { useRouter } from "next/navigation";
 import { Upload, FileText, Loader2, AlertCircle, X, CheckCircle2 } from "lucide-react";
 import clsx from "clsx";
-import { demoUpload, getAuthToken, API_BASE } from "@/lib/api";
+import { demoUpload, getAuthToken, API_BASE, ExistingSignatureInfo } from "@/lib/api";
 import AuthGuard from "@/components/AuthGuard";
 
 type FileStatus = "pending" | "uploading" | "done" | "error";
@@ -28,6 +28,7 @@ function UploadPage() {
   const [files, setFiles] = useState<FileEntry[]>([]);
   const [busy, setBusy] = useState(false);
   const [globalError, setGlobalError] = useState<string | null>(null);
+  const [existingSignsWarning, setExistingSignsWarning] = useState<ExistingSignatureInfo[]>([]);
 
   const addFiles = (incoming: FileList | File[]) => {
     const pdfs = Array.from(incoming).filter((f) => f.type === "application/pdf");
@@ -62,6 +63,7 @@ function UploadPage() {
     setBusy(true);
 
     const batch: { document_id: string; title: string; filename: string }[] = [];
+    const allExistingSigs: ExistingSignatureInfo[] = [];
 
     for (const entry of files) {
       update(entry.id, { status: "uploading" });
@@ -70,6 +72,9 @@ function UploadPage() {
         const result = await demoUpload(entry.file, title);
         update(entry.id, { status: "done", documentId: result.document_id });
         batch.push({ document_id: result.document_id, title, filename: entry.file.name });
+        if (result.existing_signatures?.length) {
+          allExistingSigs.push(...result.existing_signatures);
+        }
       } catch (e) {
         update(entry.id, {
           status: "error",
@@ -83,6 +88,10 @@ function UploadPage() {
     if (!batch.length) {
       setGlobalError("Ни один файл не был загружен успешно");
       return;
+    }
+
+    if (allExistingSigs.length > 0) {
+      setExistingSignsWarning(allExistingSigs);
     }
 
     localStorage.setItem("pki_batch", JSON.stringify(batch));
@@ -183,6 +192,21 @@ function UploadPage() {
                       <X className="w-4 h-4" />
                     </button>
                   )}
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Existing signatures warning */}
+          {existingSignsWarning.length > 0 && (
+            <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-sm text-amber-800 space-y-1">
+              <div className="flex items-center gap-2 font-medium">
+                <AlertCircle className="w-4 h-4 shrink-0" />
+                Документ уже содержит подписи от других сторон. Они будут сохранены.
+              </div>
+              {existingSignsWarning.map((s, i) => (
+                <div key={i} className="text-xs text-amber-700 pl-6">
+                  {s.signer_name} {s.signer_iin ? `(${s.signer_iin})` : ""} — {s.valid ? "действительна" : "недействительна"}
                 </div>
               ))}
             </div>

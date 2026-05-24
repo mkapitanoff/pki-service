@@ -2,17 +2,20 @@ package handler
 
 import (
 	"crypto/sha256"
+	stderrors "errors"
+	"database/sql"
 	"encoding/hex"
 	"fmt"
 	"io"
 	"net/http"
-	stderrors "errors"
-	"database/sql"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
 	apperr "github.com/mkapitanoff/pki-service/internal/errors"
+	"github.com/mkapitanoff/pki-service/internal/ncanode"
+	internalpdf "github.com/mkapitanoff/pki-service/internal/pdf"
 	"github.com/mkapitanoff/pki-service/internal/repository"
 	"github.com/mkapitanoff/pki-service/internal/storage"
 )
@@ -22,17 +25,20 @@ type DocumentHandler struct {
 	queries       *repository.Queries
 	storage       storage.Storage
 	verifyBaseURL string
+	ncanode       ncanode.NCANodeClient
 }
 
 func NewDocumentHandler(
 	queries *repository.Queries,
 	store storage.Storage,
 	verifyBaseURL string,
+	nc ncanode.NCANodeClient,
 ) *DocumentHandler {
 	return &DocumentHandler{
 		queries:       queries,
 		storage:       store,
 		verifyBaseURL: verifyBaseURL,
+		ncanode:       nc,
 	}
 }
 
@@ -84,13 +90,48 @@ func (h *DocumentHandler) HandleUploadDocument(w http.ResponseWriter, r *http.Re
 		return
 	}
 
+	// Extract any CMS signatures already embedded in the PDF (e.g. pre-signed by another party).
+	extractedSigs := internalpdf.ExtractSignatures(pdfBytes)
+
+	// Verify extracted signatures via NCANode (best-effort, non-blocking on failure).
+	type existingSigInfo struct {
+		SignerName string `json:"signer_name"`
+		SignerIIN  string `json:"signer_iin"`
+		SignedAt   string `json:"signed_at"`
+		Valid      bool   `json:"valid"`
+	}
+	var verifiedSigs []existingSigInfo
+	var verifyResults []*ncanode.VerifyResult
+
+	if h.ncanode != nil && len(extractedSigs) > 0 {
+		for _, es := range extractedSigs {
+			vr, err := h.ncanode.VerifyCMS(r.Context(), es.CMS, docSHA256)
+			if err != nil || vr == nil {
+				continue
+			}
+			verifiedSigs = append(verifiedSigs, existingSigInfo{
+				SignerName: vr.SignerName,
+				SignerIIN:  internalpdf.MaskIIN(vr.SignerIIN),
+				SignedAt:   vr.OCSPCheckedAt.Format(time.RFC3339),
+				Valid:      vr.Valid && vr.OCSPStatus != ncanode.OCSPStatusRevoked,
+			})
+			verifyResults = append(verifyResults, vr)
+		}
+	}
+
+	// Determine initial document status.
+	docStatus := repository.DocStatusDraft
+	if len(verifiedSigs) > 0 {
+		docStatus = repository.DocStatusPartiallySigned
+	}
+
 	doc, err := h.queries.CreateDocument(r.Context(), repository.CreateDocumentParams{
 		TenantID:       tenantID,
 		Title:          toNullString(title),
 		S3KeyOriginal:  s3Key,
 		S3KeyCurrent:   s3Key,
 		CurrentVersion: 0,
-		Status:         repository.DocStatusDraft,
+		Status:         docStatus,
 		CallbackUrl:    toNullString(callbackURL),
 	})
 	if err != nil {
@@ -98,22 +139,58 @@ func (h *DocumentHandler) HandleUploadDocument(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	respondJSON(w, http.StatusCreated, map[string]any{
-		"data": map[string]any{
-			"document_id":  doc.ID,
-			"title":        doc.Title.String,
-			"sha256_hash":  docSHA256,
-			"status":       doc.Status,
-			"sign_url":     fmt.Sprintf("%s/document/%s", h.verifyBaseURL, doc.ID),
-			"callback_url": doc.CallbackUrl.String,
-		},
-	})
+	// Persist verified existing signatures.
+	for i, vr := range verifyResults {
+		if i >= len(extractedSigs) {
+			break
+		}
+		ocspStatus := repository.OcspStatusType(vr.OCSPStatus)
+		sigID := uuid.New()
+		qrURL := fmt.Sprintf("%s/verify/%s", h.verifyBaseURL, sigID)
+		_, _ = h.queries.CreateSignatureWithID(r.Context(), repository.CreateSignatureWithIDParams{
+			ID:            sigID,
+			DocumentID:    doc.ID,
+			TenantID:      tenantID,
+			VersionNumber: 0,
+			SequenceNum:   int32(i + 1),
+			CmsB64:        extractedSigs[i].CMS,
+			Role:          "external",
+			SignerIin:     sql.NullString{String: vr.SignerIIN, Valid: vr.SignerIIN != ""},
+			SignerName:    vr.SignerName,
+			SignerBin:     sql.NullString{String: vr.SignerBIN, Valid: vr.SignerBIN != ""},
+			OrgName:       sql.NullString{String: vr.OrgName, Valid: vr.OrgName != ""},
+			SignerType:    vr.SignerType,
+			Basis:         sql.NullString{String: vr.Basis, Valid: vr.Basis != ""},
+			CertSerial:    vr.CertSerial,
+			CertNotBefore: vr.CertNotBefore,
+			CertNotAfter:  vr.CertNotAfter,
+			CaName:        vr.CAName,
+			OcspStatus:    ocspStatus,
+			OcspCheckedAt: vr.OCSPCheckedAt,
+			TspTime:       sql.NullTime{Time: vr.TSPTime, Valid: !vr.TSPTime.IsZero()},
+			Sha256Hash:    docSHA256,
+			SignFormat:    vr.SignFormat,
+			QrUrl:         qrURL,
+		})
+	}
+
+	respData := map[string]any{
+		"document_id":  doc.ID,
+		"title":        doc.Title.String,
+		"sha256_hash":  docSHA256,
+		"status":       doc.Status,
+		"sign_url":     fmt.Sprintf("%s/document/%s", h.verifyBaseURL, doc.ID),
+		"callback_url": doc.CallbackUrl.String,
+	}
+	if len(verifiedSigs) > 0 {
+		respData["existing_signatures"] = verifiedSigs
+	}
+
+	respondJSON(w, http.StatusCreated, map[string]any{"data": respData})
 }
 
-// HandleDownloadDocument handles GET /api/v1/documents/:id/download.
-// Returns the current signed PDF.
-// 404 if not found, belongs to another tenant, or document is still in draft
-// (no signatures yet).
+// HandleDownloadDocument handles GET /api/v1/documents/:id/file.
+// Returns the original PDF for draft documents and the current signed PDF otherwise.
 func (h *DocumentHandler) HandleDownloadDocument(w http.ResponseWriter, r *http.Request) {
 	tenantID, ok := tenantFromCtx(r)
 	if !ok {
