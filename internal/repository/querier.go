@@ -29,6 +29,7 @@ type Querier interface {
 	GetAPIKeyByHash(ctx context.Context, keyHash string) (ApiKey, error)
 	GetAuthTokenByHash(ctx context.Context, tokenHash string) (AuthToken, error)
 	GetDocument(ctx context.Context, arg GetDocumentParams) (Document, error)
+	GetDocumentBySHA256(ctx context.Context, arg GetDocumentBySHA256Params) (Document, error)
 	GetDocumentCallbackURL(ctx context.Context, id uuid.UUID) (sql.NullString, error)
 	GetSignature(ctx context.Context, arg GetSignatureParams) (Signature, error)
 	GetSignatureByIDPublic(ctx context.Context, id uuid.UUID) (Signature, error)

@@ -42,9 +42,17 @@ func NewDocumentHandler(
 	}
 }
 
-// HandleUploadDocument handles POST /api/v1/documents/upload.
+type existingSigInfo struct {
+	SignerName string `json:"signer_name"`
+	SignerIIN  string `json:"signer_iin"`
+	SignedAt   string `json:"signed_at"`
+	Valid      bool   `json:"valid"`
+}
+
+// HandleUploadDocument handles POST /api/v1/upload.
 // Accepts multipart/form-data: file (PDF), title (string).
-// Requires APIKeyAuth — tenant is read from context.
+// If the same PDF (by SHA256) was already uploaded by this tenant, returns the
+// existing document and its signatures instead of creating a duplicate.
 func (h *DocumentHandler) HandleUploadDocument(w http.ResponseWriter, r *http.Request) {
 	tenantID, ok := tenantFromCtx(r)
 	if !ok {
@@ -64,7 +72,7 @@ func (h *DocumentHandler) HandleUploadDocument(w http.ResponseWriter, r *http.Re
 	}
 	defer f.Close()
 
-	pdfBytes, err := io.ReadAll(io.LimitReader(f, 50<<20)) // 50 MB max
+	pdfBytes, err := io.ReadAll(io.LimitReader(f, 50<<20))
 	if err != nil {
 		respondError(w, apperr.ErrInternal.WithCause(err))
 		return
@@ -77,11 +85,47 @@ func (h *DocumentHandler) HandleUploadDocument(w http.ResponseWriter, r *http.Re
 	title := r.FormValue("title")
 	callbackURL := r.FormValue("callback_url")
 
-	// SHA-256 of the original PDF (returned to caller for CMS signing).
 	sum := sha256.Sum256(pdfBytes)
 	docSHA256 := hex.EncodeToString(sum[:])
 
-	// Use a stable UUID as the S3 path segment so the key is predictable.
+	// ── SHA256 dedup: return existing document if this PDF was already uploaded ──
+	existing, err := h.queries.GetDocumentBySHA256(r.Context(), repository.GetDocumentBySHA256Params{
+		TenantID:   tenantID,
+		Sha256Hash: docSHA256,
+	})
+	if err == nil {
+		// Found existing document — fetch its signatures and return.
+		fmt.Printf("[upload] SHA256 match: doc=%s tenant=%s\n", existing.ID, tenantID)
+		dbSigs, _ := h.queries.GetSignaturesByDocument(r.Context(), repository.GetSignaturesByDocumentParams{
+			DocumentID: existing.ID,
+			TenantID:   tenantID,
+		})
+		var existingSigs []existingSigInfo
+		for _, s := range dbSigs {
+			existingSigs = append(existingSigs, existingSigInfo{
+				SignerName: s.SignerName,
+				SignerIIN:  internalpdf.MaskIIN(s.SignerIin.String),
+				SignedAt:   s.SignedAt.Format(time.RFC3339),
+				Valid:      s.OcspStatus != repository.OcspStatusTypeRevoked,
+			})
+		}
+		respData := map[string]any{
+			"document_id":  existing.ID,
+			"title":        existing.Title.String,
+			"sha256_hash":  docSHA256,
+			"status":       existing.Status,
+			"sign_url":     fmt.Sprintf("%s/document/%s", h.verifyBaseURL, existing.ID),
+			"callback_url": existing.CallbackUrl.String,
+			"deduplicated": true,
+		}
+		if len(existingSigs) > 0 {
+			respData["existing_signatures"] = existingSigs
+		}
+		respondJSON(w, http.StatusCreated, map[string]any{"data": respData})
+		return
+	}
+
+	// ── New document ──────────────────────────────────────────────────────────
 	pathID := uuid.New()
 	s3Key := fmt.Sprintf("%s/%s/original.pdf", tenantID, pathID)
 
@@ -90,16 +134,9 @@ func (h *DocumentHandler) HandleUploadDocument(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	// Extract any CMS signatures already embedded in the PDF (e.g. pre-signed by another party).
+	// Extract CMS signatures embedded in PDF (PAdES from external tools).
 	extractedSigs := internalpdf.ExtractSignatures(pdfBytes)
 
-	// Verify extracted signatures via NCANode (best-effort, non-blocking on failure).
-	type existingSigInfo struct {
-		SignerName string `json:"signer_name"`
-		SignerIIN  string `json:"signer_iin"`
-		SignedAt   string `json:"signed_at"`
-		Valid      bool   `json:"valid"`
-	}
 	var verifiedSigs []existingSigInfo
 	var verifyResults []*ncanode.VerifyResult
 
@@ -119,7 +156,6 @@ func (h *DocumentHandler) HandleUploadDocument(w http.ResponseWriter, r *http.Re
 		}
 	}
 
-	// Determine initial document status.
 	docStatus := repository.DocStatusDraft
 	if len(verifiedSigs) > 0 {
 		docStatus = repository.DocStatusPartiallySigned
@@ -133,18 +169,18 @@ func (h *DocumentHandler) HandleUploadDocument(w http.ResponseWriter, r *http.Re
 		CurrentVersion: 0,
 		Status:         docStatus,
 		CallbackUrl:    toNullString(callbackURL),
+		Sha256Hash:     docSHA256,
 	})
 	if err != nil {
 		respondError(w, apperr.ErrInternal.WithCause(fmt.Errorf("create document: %w", err)))
 		return
 	}
 
-	// Persist verified existing signatures.
+	// Persist verified external signatures.
 	for i, vr := range verifyResults {
 		if i >= len(extractedSigs) {
 			break
 		}
-		ocspStatus := repository.OcspStatusType(vr.OCSPStatus)
 		sigID := uuid.New()
 		qrURL := fmt.Sprintf("%s/verify/%s", h.verifyBaseURL, sigID)
 		_, _ = h.queries.CreateSignatureWithID(r.Context(), repository.CreateSignatureWithIDParams{
@@ -165,7 +201,7 @@ func (h *DocumentHandler) HandleUploadDocument(w http.ResponseWriter, r *http.Re
 			CertNotBefore: vr.CertNotBefore,
 			CertNotAfter:  vr.CertNotAfter,
 			CaName:        vr.CAName,
-			OcspStatus:    ocspStatus,
+			OcspStatus:    repository.OcspStatusType(vr.OCSPStatus),
 			OcspCheckedAt: vr.OCSPCheckedAt,
 			TspTime:       sql.NullTime{Time: vr.TSPTime, Valid: !vr.TSPTime.IsZero()},
 			Sha256Hash:    docSHA256,
@@ -190,7 +226,6 @@ func (h *DocumentHandler) HandleUploadDocument(w http.ResponseWriter, r *http.Re
 }
 
 // HandleDownloadDocument handles GET /api/v1/documents/:id/file.
-// Returns the original PDF for draft documents and the current signed PDF otherwise.
 func (h *DocumentHandler) HandleDownloadDocument(w http.ResponseWriter, r *http.Request) {
 	tenantID, ok := tenantFromCtx(r)
 	if !ok {
@@ -217,7 +252,6 @@ func (h *DocumentHandler) HandleDownloadDocument(w http.ResponseWriter, r *http.
 		return
 	}
 
-	// For draft documents serve the original PDF; for signed/partially_signed serve the current (stamped) PDF.
 	s3Key := doc.S3KeyOriginal
 	if doc.Status == repository.DocStatusSigned || doc.Status == repository.DocStatusPartiallySigned {
 		s3Key = doc.S3KeyCurrent
@@ -246,7 +280,6 @@ func (h *DocumentHandler) HandleDownloadDocument(w http.ResponseWriter, r *http.
 	_, _ = w.Write(data)
 }
 
-// sanitizeFilename replaces characters unsafe in Content-Disposition filenames.
 func sanitizeFilename(s string) string {
 	out := make([]byte, 0, len(s))
 	for i := 0; i < len(s); i++ {

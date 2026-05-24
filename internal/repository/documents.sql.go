@@ -15,11 +15,11 @@ import (
 
 const createDocument = `-- name: CreateDocument :one
 INSERT INTO documents (
-    tenant_id, title, s3_key_original, s3_key_current, current_version, status, metadata, callback_url
+    tenant_id, title, s3_key_original, s3_key_current, current_version, status, metadata, callback_url, sha256_hash
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8
+    $1, $2, $3, $4, $5, $6, $7, $8, $9
 )
-RETURNING id, tenant_id, title, s3_key_original, s3_key_current, current_version, status, metadata, created_at, updated_at, callback_url
+RETURNING id, tenant_id, title, s3_key_original, s3_key_current, current_version, status, metadata, created_at, updated_at, callback_url, sha256_hash
 `
 
 type CreateDocumentParams struct {
@@ -31,6 +31,7 @@ type CreateDocumentParams struct {
 	Status         DocStatus             `json:"status"`
 	Metadata       pqtype.NullRawMessage `json:"metadata"`
 	CallbackUrl    sql.NullString        `json:"callback_url"`
+	Sha256Hash     string                `json:"sha256_hash"`
 }
 
 func (q *Queries) CreateDocument(ctx context.Context, arg CreateDocumentParams) (Document, error) {
@@ -43,6 +44,7 @@ func (q *Queries) CreateDocument(ctx context.Context, arg CreateDocumentParams) 
 		arg.Status,
 		arg.Metadata,
 		arg.CallbackUrl,
+		arg.Sha256Hash,
 	)
 	var i Document
 	err := row.Scan(
@@ -57,6 +59,7 @@ func (q *Queries) CreateDocument(ctx context.Context, arg CreateDocumentParams) 
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.CallbackUrl,
+		&i.Sha256Hash,
 	)
 	return i, err
 }
@@ -93,7 +96,7 @@ func (q *Queries) CreateDocumentVersion(ctx context.Context, arg CreateDocumentV
 }
 
 const getDocument = `-- name: GetDocument :one
-SELECT id, tenant_id, title, s3_key_original, s3_key_current, current_version, status, metadata, created_at, updated_at, callback_url FROM documents
+SELECT id, tenant_id, title, s3_key_original, s3_key_current, current_version, status, metadata, created_at, updated_at, callback_url, sha256_hash FROM documents
 WHERE id = $1 AND tenant_id = $2
 `
 
@@ -117,6 +120,39 @@ func (q *Queries) GetDocument(ctx context.Context, arg GetDocumentParams) (Docum
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.CallbackUrl,
+		&i.Sha256Hash,
+	)
+	return i, err
+}
+
+const getDocumentBySHA256 = `-- name: GetDocumentBySHA256 :one
+SELECT id, tenant_id, title, s3_key_original, s3_key_current, current_version, status, metadata, created_at, updated_at, callback_url, sha256_hash FROM documents
+WHERE tenant_id = $1 AND sha256_hash = $2
+ORDER BY created_at DESC
+LIMIT 1
+`
+
+type GetDocumentBySHA256Params struct {
+	TenantID   uuid.UUID `json:"tenant_id"`
+	Sha256Hash string    `json:"sha256_hash"`
+}
+
+func (q *Queries) GetDocumentBySHA256(ctx context.Context, arg GetDocumentBySHA256Params) (Document, error) {
+	row := q.db.QueryRowContext(ctx, getDocumentBySHA256, arg.TenantID, arg.Sha256Hash)
+	var i Document
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.Title,
+		&i.S3KeyOriginal,
+		&i.S3KeyCurrent,
+		&i.CurrentVersion,
+		&i.Status,
+		&i.Metadata,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.CallbackUrl,
+		&i.Sha256Hash,
 	)
 	return i, err
 }
@@ -136,7 +172,7 @@ const updateDocumentStatus = `-- name: UpdateDocumentStatus :one
 UPDATE documents
 SET status = $3, updated_at = now()
 WHERE id = $1 AND tenant_id = $2
-RETURNING id, tenant_id, title, s3_key_original, s3_key_current, current_version, status, metadata, created_at, updated_at, callback_url
+RETURNING id, tenant_id, title, s3_key_original, s3_key_current, current_version, status, metadata, created_at, updated_at, callback_url, sha256_hash
 `
 
 type UpdateDocumentStatusParams struct {
@@ -160,6 +196,7 @@ func (q *Queries) UpdateDocumentStatus(ctx context.Context, arg UpdateDocumentSt
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.CallbackUrl,
+		&i.Sha256Hash,
 	)
 	return i, err
 }
@@ -168,7 +205,7 @@ const updateDocumentVersion = `-- name: UpdateDocumentVersion :one
 UPDATE documents
 SET s3_key_current = $3, current_version = $4, status = $5, updated_at = now()
 WHERE id = $1 AND tenant_id = $2
-RETURNING id, tenant_id, title, s3_key_original, s3_key_current, current_version, status, metadata, created_at, updated_at, callback_url
+RETURNING id, tenant_id, title, s3_key_original, s3_key_current, current_version, status, metadata, created_at, updated_at, callback_url, sha256_hash
 `
 
 type UpdateDocumentVersionParams struct {
@@ -200,6 +237,7 @@ func (q *Queries) UpdateDocumentVersion(ctx context.Context, arg UpdateDocumentV
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.CallbackUrl,
+		&i.Sha256Hash,
 	)
 	return i, err
 }

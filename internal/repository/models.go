@@ -187,6 +187,7 @@ type Document struct {
 	CreatedAt      time.Time             `json:"created_at"`
 	UpdatedAt      time.Time             `json:"updated_at"`
 	CallbackUrl    sql.NullString        `json:"callback_url"`
+	Sha256Hash     string                `json:"sha256_hash"`
 }
 
 type DocumentVersion struct {
