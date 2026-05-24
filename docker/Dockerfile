@@ -20,6 +20,7 @@ RUN apk add --no-cache ca-certificates curl tzdata fontconfig && fc-cache -fv
 
 RUN mkdir -p /root/.config/pdfcpu/fonts
 COPY docker/fonts/ArialUnicodeMS.ttf /root/.config/pdfcpu/fonts/ArialUnicodeMS.ttf
+COPY docker/fonts/ArialUnicodeMS.gob /root/.config/pdfcpu/fonts/ArialUnicodeMS.gob
 
 WORKDIR /app
 

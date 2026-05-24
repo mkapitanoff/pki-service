@@ -116,12 +116,19 @@ func initPDFCPUFonts() {
 		font.UserFontDir = fontDir
 
 		// pdfcpu stores parsed font data as .gob files.
-		// Convert TTF → GOB if the GOB is not yet present.
-		ttfPath := filepath.Join(fontDir, "ArialUnicodeMS.ttf")
-		if _, err := os.Stat(ttfPath); err == nil {
-			if err := font.InstallTrueTypeFont(fontDir, ttfPath); err != nil {
-				fmt.Printf("[pdf] InstallTrueTypeFont error: %v\n", err)
+		// If a pre-built .gob is already present (copied from macOS via Docker),
+		// skip InstallTrueTypeFont to avoid Linux corrupt-CMap issue.
+		gobPath := filepath.Join(fontDir, "ArialUnicodeMS.gob")
+		if _, err := os.Stat(gobPath); err != nil {
+			// .gob not found — generate it from TTF.
+			ttfPath := filepath.Join(fontDir, "ArialUnicodeMS.ttf")
+			if _, err := os.Stat(ttfPath); err == nil {
+				if err := font.InstallTrueTypeFont(fontDir, ttfPath); err != nil {
+					fmt.Printf("[pdf] InstallTrueTypeFont error: %v\n", err)
+				}
 			}
+		} else {
+			fmt.Printf("[pdf] found pre-built gob at %s, skipping InstallTrueTypeFont\n", gobPath)
 		}
 
 		if err := font.LoadUserFonts(); err != nil {
