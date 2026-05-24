@@ -539,6 +539,53 @@ go test ./... -v -count=1
 
 ---
 
+## Деплой на prod сервер
+
+Сервер: root@77.42.30.254
+SSH ключ: ~/.ssh/claude_deploy (ed25519)
+Репозиторий на сервере: /opt/pki-service
+Docker compose: docker/docker-compose.prod.yml
+Env файл: .env.prod (только на сервере, не в git)
+
+### Деплой API (после изменений в Go коде):
+```bash
+ssh -i ~/.ssh/claude_deploy root@77.42.30.254 "
+cd /opt/pki-service && \
+GIT_SSH_COMMAND='ssh -i ~/.ssh/deploy_key' git pull origin main && \
+docker compose -f docker/docker-compose.prod.yml --env-file .env.prod up -d --build api && \
+sleep 5 && \
+docker logs pki_api_prod --tail 10
+"
+```
+
+### Деплой фронтенда (после изменений в web/):
+```bash
+ssh -i ~/.ssh/claude_deploy root@77.42.30.254 "
+cd /opt/pki-service && \
+GIT_SSH_COMMAND='ssh -i ~/.ssh/deploy_key' git pull origin main && \
+docker build --no-cache \
+  --build-arg NEXT_PUBLIC_API_BASE=https://pki-service.darch.pro \
+  -t docker-frontend:latest \
+  -f web/Dockerfile web/ && \
+docker stop pki_frontend_prod && docker rm pki_frontend_prod && \
+docker compose -f docker/docker-compose.prod.yml --env-file .env.prod up -d frontend && \
+sleep 5 && \
+docker logs pki_frontend_prod --tail 5
+"
+```
+
+### Просмотр логов:
+```bash
+ssh -i ~/.ssh/claude_deploy root@77.42.30.254 "docker logs pki_api_prod --tail 50"
+```
+
+### Проверка здоровья:
+```bash
+curl -s https://pki-service.darch.pro/health
+```
+
+---
+
 ## Текущий статус (обновлять вручную)
 
 - [x] Модуль 0: Scaffold + Docker Compose (test + prod) + Config
