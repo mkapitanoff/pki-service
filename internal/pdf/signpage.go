@@ -83,24 +83,25 @@ var activeFontName = "Helvetica"
 // cyrillicEnabled is true when a Unicode font with Cyrillic glyphs was loaded.
 var cyrillicEnabled = false
 
-// ttfFontPath returns the path to ArialUnicodeMS.ttf for the current OS.
+// ourFontDir is the absolute font directory we resolved — separate from font.UserFontDir
+// because pdfcpu may mutate that variable internally after LoadUserFonts().
+var ourFontDir = ""
+
+// ttfFontPath returns the absolute path to ArialUnicodeMS.ttf.
 // Returns "" if the file is not found.
 func ttfFontPath() string {
 	candidates := []string{
 		"/root/.config/pdfcpu/fonts/ArialUnicodeMS.ttf", // Docker (Linux) — hardcoded absolute
 		"/Library/Fonts/Arial Unicode.ttf",              // macOS system
 	}
-	// Also try relative to font.UserFontDir (set by initPDFCPUFonts).
-	if font.UserFontDir != "" {
-		candidates = append([]string{filepath.Join(font.UserFontDir, "ArialUnicodeMS.ttf")}, candidates...)
-	}
-	// os.UserHomeDir() may return relative path in some Docker envs — guard with filepath.IsAbs.
-	if home, err := os.UserHomeDir(); err == nil && filepath.IsAbs(home) {
-		candidates = append(candidates,
-			filepath.Join(home, ".config", "pdfcpu", "fonts", "ArialUnicodeMS.ttf"),
-		)
+	// Prefer the dir we resolved in initPDFCPUFonts (always absolute).
+	if ourFontDir != "" {
+		candidates = append([]string{filepath.Join(ourFontDir, "ArialUnicodeMS.ttf")}, candidates...)
 	}
 	for _, p := range candidates {
+		if !filepath.IsAbs(p) {
+			continue // skip any relative path — would silently fail
+		}
 		if _, err := os.Stat(p); err == nil {
 			return p
 		}
@@ -135,6 +136,7 @@ func initPDFCPUFonts() {
 		}
 
 		font.UserFontDir = fontDir
+		ourFontDir = fontDir // save absolute path before pdfcpu can mutate font.UserFontDir
 
 		gobPath := filepath.Join(fontDir, "ArialUnicodeMS.gob")
 		if _, err := os.Stat(gobPath); err != nil {
