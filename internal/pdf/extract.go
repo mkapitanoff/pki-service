@@ -3,7 +3,9 @@ package pdf
 import (
 	"encoding/base64"
 	"encoding/hex"
+	"fmt"
 	"regexp"
+	"strings"
 )
 
 // ExistingSignature holds a CMS signature found inside a PDF file.
@@ -11,64 +13,88 @@ type ExistingSignature struct {
 	CMS string // base64-encoded DER CMS
 }
 
-// reContents matches /Contents <hexdata> in a PDF byte stream.
-// The PDF spec stores CMS as a hex string enclosed in angle brackets.
-var reContents = regexp.MustCompile(`/Contents\s*<([0-9A-Fa-f]+)>`)
+// reContents matches /Contents <hexdata> where hexdata may contain whitespace
+// (PDF spec §7.3.4.3: whitespace in hex strings is ignored).
+var reContents = regexp.MustCompile(`/Contents\s*<([0-9A-Fa-f\s]+)>`)
 
-// reByteRange is used as a proximity check — we only accept /Contents entries
-// that appear near a /ByteRange array (i.e. they belong to a /Sig dictionary).
-var reByteRange = regexp.MustCompile(`/ByteRange\s*\[`)
+// reByteRange detects signature dictionaries.
+var reByteRange = regexp.MustCompile(`/ByteRange\s*[\[<]`)
 
 // ExtractSignatures scans raw PDF bytes for CAdES/CMS signatures embedded as
-// /Sig form fields (/ByteRange + /Contents). It returns a best-effort list;
-// any parse error causes an empty (nil) result rather than a hard error.
+// /Sig form fields (/ByteRange + /Contents). Best-effort; returns nil on failure.
 func ExtractSignatures(pdfBytes []byte) []ExistingSignature {
-	// Locate all /ByteRange markers so we know which regions of the file
-	// contain signature dictionaries.
-	brLocs := reByteRange.FindAllIndex(pdfBytes, -1)
+	text := string(pdfBytes)
+
+	// Find all /ByteRange positions.
+	brLocs := reByteRange.FindAllStringIndex(text, -1)
+	fmt.Printf("[extract] found %d /ByteRange markers in PDF (%d bytes)\n", len(brLocs), len(pdfBytes))
 	if len(brLocs) == 0 {
 		return nil
 	}
 
-	// For each /ByteRange, search for a /Contents entry in a window around it.
-	// Window size: 64 KB in each direction should cover any realistic /Sig dict.
-	const window = 64 * 1024
+	// Search a generous window around each /ByteRange for a /Contents entry.
+	// Use 512 KB — large PDFs can have big gap between ByteRange and Contents.
+	const window = 512 * 1024
 
-	seen := map[string]struct{}{} // dedup by hex prefix
+	seen := map[string]struct{}{}
 	var sigs []ExistingSignature
 
-	for _, loc := range brLocs {
+	for idx, loc := range brLocs {
 		start := loc[0] - window
 		if start < 0 {
 			start = 0
 		}
 		end := loc[1] + window
-		if end > len(pdfBytes) {
-			end = len(pdfBytes)
+		if end > len(text) {
+			end = len(text)
 		}
 
-		chunk := pdfBytes[start:end]
-		matches := reContents.FindAllSubmatch(chunk, -1)
+		chunk := text[start:end]
+		matches := reContents.FindAllStringSubmatch(chunk, -1)
+		fmt.Printf("[extract] ByteRange[%d]: window [%d..%d], /Contents matches: %d\n", idx, start, end, len(matches))
+
 		for _, m := range matches {
-			hexData := m[1]
-			key := string(hexData[:min(32, len(hexData))])
+			// Strip whitespace from hex string (PDF spec allows it).
+			hexRaw := strings.Join(strings.Fields(m[1]), "")
+			if len(hexRaw) < 16 {
+				fmt.Printf("[extract] skip short hex (%d chars)\n", len(hexRaw))
+				continue
+			}
+
+			// Dedup by first 32 hex chars.
+			key := hexRaw[:min(32, len(hexRaw))]
 			if _, dup := seen[key]; dup {
 				continue
 			}
 			seen[key] = struct{}{}
 
-			raw, err := hex.DecodeString(string(hexData))
-			if err != nil || len(raw) < 8 {
+			raw, err := hex.DecodeString(hexRaw)
+			if err != nil {
+				fmt.Printf("[extract] hex decode error: %v (hex len=%d)\n", err, len(hexRaw))
 				continue
 			}
-			// Sanity-check: DER sequence tag 0x30 expected at the start of CMS.
-			if raw[0] != 0x30 {
+			if len(raw) < 8 {
+				fmt.Printf("[extract] DER too short: %d bytes\n", len(raw))
 				continue
 			}
+
+			// Strip trailing zero-padding (PDF reserves space by padding with 0x00).
+			trimmed := strings.TrimRight(string(raw), "\x00")
+			raw = []byte(trimmed)
+
+			// Sanity-check: DER SEQUENCE tag.
+			if len(raw) == 0 || raw[0] != 0x30 {
+				fmt.Printf("[extract] not a DER SEQUENCE (first byte=0x%02x), skip\n", raw[0])
+				continue
+			}
+
+			fmt.Printf("[extract] found CMS: DER %d bytes\n", len(raw))
 			cms := base64.StdEncoding.EncodeToString(raw)
 			sigs = append(sigs, ExistingSignature{CMS: cms})
 		}
 	}
+
+	fmt.Printf("[extract] total extracted signatures: %d\n", len(sigs))
 	return sigs
 }
 
