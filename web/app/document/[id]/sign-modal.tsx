@@ -5,7 +5,7 @@ import * as Dialog from "@radix-ui/react-dialog";
 import { Loader2, Wifi, PenLine, X, CheckCircle2, AlertCircle } from "lucide-react";
 import clsx from "clsx";
 import { connectNCALayer, signWithNCALayer, disconnectNCALayer } from "@/lib/ncalayer";
-import { signDocument } from "@/lib/api";
+import { signDocumentAsync, pollSignStatus } from "@/lib/api";
 
 type Step =
   | "idle"
@@ -79,11 +79,10 @@ export function SignModal({
       const cms = await signWithNCALayer(documentBase64);
 
       setStep("verifying");
-      const result = await signDocument(documentId, cms, role);
+      await signDocumentAsync(documentId, cms, role);
 
       setStep("generating_pdf");
-      // Brief pause so user sees the "Формирование PDF..." state
-      await new Promise((r) => setTimeout(r, 600));
+      const result = await pollSignStatus(documentId);
 
       setStep("done");
       setTimeout(() => {

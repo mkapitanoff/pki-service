@@ -151,6 +151,8 @@ func main() {
 		api.Post("/documents", signHandler.HandleCreateDocument)
 		api.Get("/documents/{id}", signHandler.HandleGetDocument)
 		api.Post("/documents/{id}/sign", signHandler.HandleSign)
+		api.Post("/documents/{id}/sign-async", signHandler.HandleSignAsync)
+		api.Get("/documents/{id}/sign-status", signHandler.HandleSignStatus)
 
 		// Production upload/download — paths avoid {id} wildcard conflict.
 		api.Post("/upload", documentHandler.HandleUploadDocument)

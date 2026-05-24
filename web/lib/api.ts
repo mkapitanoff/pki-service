@@ -199,6 +199,54 @@ export async function signDocument(
   return handleResponse(res);
 }
 
+export async function signDocumentAsync(
+  id: string,
+  cms: string,
+  role: string
+): Promise<void> {
+  const res = await fetch(`${API_BASE}/api/v1/documents/${id}/sign-async`, {
+    method: "POST",
+    headers: authHeaders(),
+    body: JSON.stringify({ cms, role }),
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => res.statusText);
+    throw new Error(`HTTP ${res.status}: ${text}`);
+  }
+}
+
+export type SignStatusResponse =
+  | { status: "processing" }
+  | { status: "not_found" }
+  | { status: "error"; error: string }
+  | ({ status: "done" } & SignResult);
+
+export async function getSignStatus(id: string): Promise<SignStatusResponse> {
+  const res = await fetch(`${API_BASE}/api/v1/documents/${id}/sign-status`, {
+    headers: authHeaders(false),
+    cache: "no-store",
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
+}
+
+export async function pollSignStatus(
+  id: string,
+  maxAttempts = 60,
+  intervalMs = 2000
+): Promise<SignResult> {
+  for (let i = 0; i < maxAttempts; i++) {
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+    const result = await getSignStatus(id);
+    if (result.status === "done") {
+      const { status: _, ...rest } = result;
+      return rest as SignResult;
+    }
+    if (result.status === "error") throw new Error(result.error);
+  }
+  throw new Error("Timeout: подписание заняло слишком долго");
+}
+
 export async function demoUpload(
   file: File,
   title: string

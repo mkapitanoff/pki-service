@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Loader2, CheckCircle2, AlertCircle, ExternalLink, Download, QrCode } from "lucide-react";
 import clsx from "clsx";
-import { signDocument, getAuthToken, API_BASE } from "@/lib/api";
+import { signDocumentAsync, pollSignStatus, getAuthToken, API_BASE } from "@/lib/api";
 import { signMultiple } from "@/lib/ncalayer";
 import AuthGuard from "@/components/AuthGuard";
 
@@ -138,14 +138,15 @@ function BatchPage() {
       return;
     }
 
-    // Step 3: submit each CMS
-    for (let i = 0; i < toSign.length; i++) {
-      const item = toSign[i];
+    // Step 3: submit each CMS async, then poll for results in parallel
+    const pollPromises = toSign.map(async (item, i) => {
       const cms = signatures[i];
-      if (!cms) { update(item.document_id, { status: "error", error: "Нет подписи" }); continue; }
+      if (!cms) { update(item.document_id, { status: "error", error: "Нет подписи" }); return; }
       update(item.document_id, { status: "submitting" });
       try {
-        const result = await signDocument(item.document_id, cms, role);
+        await signDocumentAsync(item.document_id, cms, role);
+        update(item.document_id, { status: "signing" });
+        const result = await pollSignStatus(item.document_id);
         update(item.document_id, { status: "signed", signature_id: result.signature_id });
       } catch (e) {
         update(item.document_id, {
@@ -153,7 +154,9 @@ function BatchPage() {
           error: e instanceof Error ? e.message : "Ошибка подписания",
         });
       }
-    }
+    });
+
+    await Promise.all(pollPromises);
 
     setBusy(false);
     setDone(true);

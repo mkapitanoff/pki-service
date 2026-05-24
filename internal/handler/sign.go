@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"sync"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -13,6 +14,15 @@ import (
 	"github.com/mkapitanoff/pki-service/internal/repository"
 	"github.com/mkapitanoff/pki-service/internal/service"
 )
+
+// signingJobs tracks async sign operations keyed by document_id string.
+var signingJobs sync.Map
+
+type signJobStatus struct {
+	Status string
+	Result *service.SignResult
+	Error  string
+}
 
 type ctxKey string
 
@@ -80,6 +90,90 @@ func (h *SignHandler) HandleSign(w http.ResponseWriter, r *http.Request) {
 			"redirect_url":        result.RedirectURL,
 		},
 	})
+}
+
+// HandleSignAsync starts signing in a goroutine and immediately returns 202.
+func (h *SignHandler) HandleSignAsync(w http.ResponseWriter, r *http.Request) {
+	tenantID, ok := tenantFromCtx(r)
+	if !ok {
+		respondError(w, apperr.ErrUnauthorized)
+		return
+	}
+
+	docID, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		respondError(w, apperr.ErrInvalidRequest)
+		return
+	}
+
+	var req signRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.CMS == "" {
+		respondError(w, apperr.ErrInvalidRequest)
+		return
+	}
+
+	key := docID.String()
+	signingJobs.Store(key, &signJobStatus{Status: "processing"})
+
+	input := service.SignInput{
+		DocumentID: docID,
+		TenantID:   tenantID,
+		CMS:        req.CMS,
+		Role:       req.Role,
+	}
+
+	go func() {
+		result, err := h.signSvc.Sign(context.Background(), input)
+		if err != nil {
+			msg := err.Error()
+			signingJobs.Store(key, &signJobStatus{Status: "error", Error: msg})
+			return
+		}
+		signingJobs.Store(key, &signJobStatus{Status: "done", Result: result})
+	}()
+
+	respondJSON(w, http.StatusAccepted, map[string]any{
+		"status":      "processing",
+		"document_id": docID,
+	})
+}
+
+// HandleSignStatus returns the current async signing status for a document.
+func (h *SignHandler) HandleSignStatus(w http.ResponseWriter, r *http.Request) {
+	docID, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		respondError(w, apperr.ErrInvalidRequest)
+		return
+	}
+
+	key := docID.String()
+	raw, ok := signingJobs.Load(key)
+	if !ok {
+		respondJSON(w, http.StatusOK, map[string]any{"status": "not_found"})
+		return
+	}
+
+	job := raw.(*signJobStatus)
+	switch job.Status {
+	case "processing":
+		respondJSON(w, http.StatusOK, map[string]any{"status": "processing"})
+	case "error":
+		respondJSON(w, http.StatusOK, map[string]any{
+			"status": "error",
+			"error":  job.Error,
+		})
+	case "done":
+		signingJobs.Delete(key) // cleanup after client reads result
+		respondJSON(w, http.StatusOK, map[string]any{
+			"status":              "done",
+			"signature_id":        job.Result.SignatureID,
+			"signed_document_url": job.Result.SignedDocumentURL,
+			"signature":           job.Result.Signature,
+			"redirect_url":        job.Result.RedirectURL,
+		})
+	default:
+		respondJSON(w, http.StatusOK, map[string]any{"status": "not_found"})
+	}
 }
 
 type createDocumentRequest struct {
