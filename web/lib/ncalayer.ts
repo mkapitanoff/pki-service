@@ -1,5 +1,14 @@
 import { NCALayerClient } from "ncalayer-js-client";
 
+// NCALayer может вернуть PEM-обёртку (-----BEGIN CMS-----\n...\n-----END CMS-----)
+// NCANode ожидает чистый base64 без заголовков и переносов строк.
+function stripPem(s: string): string {
+  return s
+    .replace(/-----BEGIN[^-]*-----/g, "")
+    .replace(/-----END[^-]*-----/g, "")
+    .replace(/\s+/g, "");
+}
+
 let _client: NCALayerClient | null = null;
 
 function getClient(): NCALayerClient {
@@ -24,8 +33,8 @@ export async function signWithNCALayer(documentBase64: string): Promise<string> 
     NCALayerClient.basicsCMSParamsAttached,
     NCALayerClient.basicsSignerSignAny,
   );
-  if (typeof result === "string") return result;
-  if (Array.isArray(result) && result.length > 0) return result[0] as string;
+  if (typeof result === "string") return stripPem(result);
+  if (Array.isArray(result) && result.length > 0) return stripPem(result[0] as string);
   throw new Error("NCALayer: пустой ответ");
 }
 
@@ -41,8 +50,8 @@ export async function signMultiple(documentsBase64: string[]): Promise<string[]>
       NCALayerClient.basicsCMSParamsAttached,
       NCALayerClient.basicsSignerSignAny,
     );
-    if (Array.isArray(result)) return result as string[];
-    if (typeof result === "string") return [result];
+    if (Array.isArray(result)) return (result as string[]).map(stripPem);
+    if (typeof result === "string") return [stripPem(result)];
     throw new Error("NCALayer: неожиданный ответ мультиподписания");
   }
 
@@ -55,8 +64,8 @@ export async function signMultiple(documentsBase64: string[]): Promise<string[]>
       NCALayerClient.basicsCMSParamsAttached,
       NCALayerClient.basicsSignerSignAny,
     );
-    if (typeof sig === "string") signatures.push(sig);
-    else if (Array.isArray(sig) && sig.length > 0) signatures.push(sig[0] as string);
+    if (typeof sig === "string") signatures.push(stripPem(sig));
+    else if (Array.isArray(sig) && sig.length > 0) signatures.push(stripPem(sig[0] as string));
     else throw new Error("NCALayer: пустой ответ при подписании");
   }
   return signatures;
