@@ -10,6 +10,7 @@ import AuthGuard from "@/components/AuthGuard";
 
 type DocStatus =
   | "waiting"
+  | "already_signed"
   | "fetching"
   | "signing"
   | "submitting"
@@ -23,6 +24,7 @@ type BatchItem = {
   status: DocStatus;
   error?: string;
   signature_id?: string;
+  deduplicated?: boolean;
 };
 
 const ROLE_OPTIONS = [
@@ -34,12 +36,13 @@ const ROLE_OPTIONS = [
 ];
 
 const STATUS_LABEL: Record<DocStatus, string> = {
-  waiting:    "Ожидает подписания",
-  fetching:   "Загрузка PDF...",
-  signing:    "Подписывается...",
-  submitting: "Отправка подписи...",
-  signed:     "Подписан",
-  error:      "Ошибка",
+  waiting:       "Ожидает подписания",
+  already_signed:"Уже подписан",
+  fetching:      "Загрузка PDF...",
+  signing:       "Подписывается...",
+  submitting:    "Отправка подписи...",
+  signed:        "Подписан",
+  error:         "Ошибка",
 };
 
 function arrayBufferToBase64(buffer: ArrayBuffer): string {
@@ -47,8 +50,7 @@ function arrayBufferToBase64(buffer: ArrayBuffer): string {
   let binary = "";
   const chunkSize = 8192;
   for (let i = 0; i < bytes.length; i += chunkSize) {
-    const chunk = bytes.subarray(i, i + chunkSize);
-    binary += String.fromCharCode(...chunk);
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
   }
   return btoa(binary);
 }
@@ -59,8 +61,7 @@ async function fetchBase64(documentId: string): Promise<string> {
     headers: token ? { Authorization: `Bearer ${token}` } : {},
   });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  const arrayBuffer = await res.arrayBuffer();
-  return arrayBufferToBase64(arrayBuffer);
+  return arrayBufferToBase64(await res.arrayBuffer());
 }
 
 async function downloadFile(documentId: string, filename: string) {
@@ -90,8 +91,16 @@ function BatchPage() {
     const raw = localStorage.getItem("pki_batch");
     if (!raw) { router.push("/"); return; }
     try {
-      const batch = JSON.parse(raw) as { document_id: string; title: string; filename: string }[];
-      setItems(batch.map((b) => ({ ...b, status: "waiting" })));
+      const batch = JSON.parse(raw) as {
+        document_id: string;
+        title: string;
+        filename: string;
+        deduplicated?: boolean;
+      }[];
+      setItems(batch.map((b) => ({
+        ...b,
+        status: b.deduplicated ? "already_signed" : "waiting",
+      })));
     } catch {
       router.push("/");
     }
@@ -105,9 +114,12 @@ function BatchPage() {
     setGlobalError(null);
     setBusy(true);
 
-    // Step 1: fetch base64 for each doc
+    // Exclude already_signed items — they are not sent to NCALayer
+    const toProcess = items.filter((it) => it.status !== "already_signed");
+
+    // Step 1: fetch base64
     const base64Map: Record<string, string> = {};
-    for (const item of items) {
+    for (const item of toProcess) {
       update(item.document_id, { status: "fetching" });
       try {
         base64Map[item.document_id] = await fetchBase64(item.document_id);
@@ -119,9 +131,9 @@ function BatchPage() {
       }
     }
 
-    const toSign = items.filter((it) => base64Map[it.document_id]);
+    const toSign = toProcess.filter((it) => base64Map[it.document_id]);
     if (!toSign.length) {
-      setGlobalError("Не удалось загрузить ни один документ");
+      setGlobalError("Не удалось загрузить ни один документ для подписания");
       setBusy(false);
       return;
     }
@@ -138,7 +150,7 @@ function BatchPage() {
       return;
     }
 
-    // Step 3: submit each CMS async, then poll for results in parallel
+    // Step 3: submit each CMS async, poll in parallel
     const pollPromises = toSign.map(async (item, i) => {
       const cms = signatures[i];
       if (!cms) { update(item.document_id, { status: "error", error: "Нет подписи" }); return; }
@@ -167,7 +179,11 @@ function BatchPage() {
     router.push("/");
   };
 
-  const allSigned = items.length > 0 && items.every((it) => it.status === "signed");
+  const signable = items.filter((it) => it.status !== "already_signed");
+  const allSigned = signable.length > 0 && signable.every((it) => it.status === "signed");
+
+  // Show actions column when done OR when there are already_signed items
+  const showActions = done || items.some((it) => it.status === "already_signed");
 
   if (!items.length) {
     return (
@@ -193,7 +209,9 @@ function BatchPage() {
             <span className="text-zinc-400">Загрузка документов</span>
             <span className="mx-2 text-zinc-300">→</span>
             <span className="w-6 h-6 rounded-full bg-[#0070f3] text-white flex items-center justify-center text-xs font-bold">2</span>
-            <span className="font-medium text-zinc-700">Подписание ({items.length} {items.length === 1 ? "документ" : "документов"})</span>
+            <span className="font-medium text-zinc-700">
+              Подписание ({signable.length} из {items.length})
+            </span>
           </div>
 
           {/* Documents table */}
@@ -202,13 +220,16 @@ function BatchPage() {
               <thead className="bg-zinc-50 border-b border-zinc-200">
                 <tr>
                   <th className="text-left px-4 py-3 text-zinc-600 font-medium">Файл</th>
-                  <th className="text-left px-4 py-3 text-zinc-600 font-medium w-40">Статус</th>
-                  {done && <th className="text-left px-4 py-3 text-zinc-600 font-medium w-40">Действия</th>}
+                  <th className="text-left px-4 py-3 text-zinc-600 font-medium w-44">Статус</th>
+                  {showActions && <th className="text-left px-4 py-3 text-zinc-600 font-medium w-32">Действия</th>}
                 </tr>
               </thead>
               <tbody className="divide-y divide-zinc-100">
                 {items.map((item) => (
-                  <tr key={item.document_id} className="hover:bg-zinc-50">
+                  <tr key={item.document_id} className={clsx(
+                    "hover:bg-zinc-50",
+                    item.status === "already_signed" && "bg-amber-50/50"
+                  )}>
                     <td className="px-4 py-3">
                       <p className="font-medium text-zinc-800 truncate max-w-xs">{item.filename}</p>
                       <p className="text-xs text-zinc-400 font-mono">{item.document_id.slice(0, 8)}…</p>
@@ -216,24 +237,26 @@ function BatchPage() {
                     <td className="px-4 py-3">
                       <span className={clsx(
                         "inline-flex items-center gap-1.5 text-xs font-medium px-2 py-1 rounded-full",
-                        item.status === "signed"    && "bg-green-50 text-green-700",
-                        item.status === "error"     && "bg-red-50 text-red-600",
-                        item.status === "waiting"   && "bg-zinc-100 text-zinc-500",
+                        item.status === "signed"         && "bg-green-50 text-green-700",
+                        item.status === "error"          && "bg-red-50 text-red-600",
+                        item.status === "waiting"        && "bg-zinc-100 text-zinc-500",
+                        item.status === "already_signed" && "bg-amber-100 text-amber-700",
                         (item.status === "fetching" || item.status === "signing" || item.status === "submitting")
                           && "bg-blue-50 text-blue-600",
                       )}>
                         {(item.status === "fetching" || item.status === "signing" || item.status === "submitting") && (
                           <Loader2 className="w-3 h-3 animate-spin" />
                         )}
-                        {item.status === "signed" && <CheckCircle2 className="w-3 h-3" />}
-                        {item.status === "error"  && <AlertCircle className="w-3 h-3" />}
+                        {item.status === "signed"         && <CheckCircle2 className="w-3 h-3" />}
+                        {item.status === "already_signed" && <AlertCircle className="w-3 h-3" />}
+                        {item.status === "error"          && <AlertCircle className="w-3 h-3" />}
                         {item.status === "error" ? item.error : STATUS_LABEL[item.status]}
                       </span>
                     </td>
-                    {done && (
+                    {showActions && (
                       <td className="px-4 py-3">
-                        {item.status === "signed" && (
-                          <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-2">
+                          {(item.status === "signed" || item.status === "already_signed") && (
                             <a
                               href={`/document/${item.document_id}`}
                               target="_blank"
@@ -243,26 +266,30 @@ function BatchPage() {
                             >
                               <ExternalLink className="w-4 h-4" />
                             </a>
-                            <button
-                              onClick={() => downloadFile(item.document_id, item.filename)}
-                              className="text-zinc-400 hover:text-zinc-700"
-                              title="Скачать PDF"
-                            >
-                              <Download className="w-4 h-4" />
-                            </button>
-                            {item.signature_id && (
-                              <a
-                                href={`/verify/${item.signature_id}`}
-                                target="_blank"
-                                rel="noopener noreferrer"
+                          )}
+                          {item.status === "signed" && (
+                            <>
+                              <button
+                                onClick={() => downloadFile(item.document_id, item.filename)}
                                 className="text-zinc-400 hover:text-zinc-700"
-                                title="QR верификация"
+                                title="Скачать PDF"
                               >
-                                <QrCode className="w-4 h-4" />
-                              </a>
-                            )}
-                          </div>
-                        )}
+                                <Download className="w-4 h-4" />
+                              </button>
+                              {item.signature_id && (
+                                <a
+                                  href={`/verify/${item.signature_id}`}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="text-zinc-400 hover:text-zinc-700"
+                                  title="QR верификация"
+                                >
+                                  <QrCode className="w-4 h-4" />
+                                </a>
+                              )}
+                            </>
+                          )}
+                        </div>
                       </td>
                     )}
                   </tr>
@@ -286,8 +313,8 @@ function BatchPage() {
             </div>
           )}
 
-          {/* Role selector + action */}
-          {!done && (
+          {/* Role selector + sign button */}
+          {!done && signable.length > 0 && (
             <div className="flex items-center gap-3">
               <label className="text-sm text-zinc-600 shrink-0">Роль подписанта:</label>
               <select
@@ -304,7 +331,7 @@ function BatchPage() {
           )}
 
           <div className="flex gap-3">
-            {!done && (
+            {!done && signable.length > 0 && (
               <button
                 type="button"
                 onClick={signAll}
@@ -316,7 +343,7 @@ function BatchPage() {
               >
                 {busy
                   ? <><Loader2 className="w-4 h-4 animate-spin" /> Подписание...</>
-                  : `Подписать все через NCALayer (${items.length})`}
+                  : `Подписать через NCALayer (${signable.length})`}
               </button>
             )}
             <button

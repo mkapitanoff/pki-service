@@ -127,6 +127,7 @@ export type DemoUploadResult = {
   sha256_hash: string;
   status: string;
   existing_signatures?: ExistingSignatureInfo[];
+  deduplicated?: boolean;
 };
 
 // ---- Auth API ----
