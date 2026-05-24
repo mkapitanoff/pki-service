@@ -212,15 +212,22 @@ func GenerateSignPage(signatures []SignatureInfo) ([]byte, error) {
 	fmt.Printf("[pdf] gofpdf: ourFontDir=%q ttf=%q\n", ourFontDir, ttf)
 
 	if ttf != "" {
-		fpdf.AddUTF8Font(fontName, "", ttf)
-		if fpdf.Error() == nil {
-			useCyrillic = true
-			fmt.Printf("[pdf] gofpdf: AddUTF8Font OK with %s\n", ttf)
+		// Use AddUTF8FontFromBytes to bypass gofpdf's internal path manipulation
+		// (it strips leading '/' when concatenating fontpath+fileStr).
+		fontBytes, readErr := os.ReadFile(ttf)
+		if readErr != nil {
+			fmt.Printf("[pdf] gofpdf: os.ReadFile(%q) error: %v, falling back to Helvetica\n", ttf, readErr)
 		} else {
-			fmt.Printf("[pdf] gofpdf AddUTF8Font error: %v, falling back to Helvetica\n", fpdf.Error())
-			fpdf = gofpdf.New("P", "mm", "A4", "")
-			fpdf.SetMargins(10, 10, 10)
-			fpdf.SetAutoPageBreak(true, 10)
+			fpdf.AddUTF8FontFromBytes(fontName, "", fontBytes)
+			if fpdf.Error() == nil {
+				useCyrillic = true
+				fmt.Printf("[pdf] gofpdf: AddUTF8FontFromBytes OK, size=%d\n", len(fontBytes))
+			} else {
+				fmt.Printf("[pdf] gofpdf AddUTF8FontFromBytes error: %v, falling back to Helvetica\n", fpdf.Error())
+				fpdf = gofpdf.New("P", "mm", "A4", "")
+				fpdf.SetMargins(10, 10, 10)
+				fpdf.SetAutoPageBreak(true, 10)
+			}
 		}
 	} else {
 		fmt.Printf("[pdf] gofpdf: no TTF found, using Helvetica fallback\n")
