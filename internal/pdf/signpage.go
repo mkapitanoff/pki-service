@@ -87,14 +87,19 @@ var cyrillicEnabled = false
 // Returns "" if the file is not found.
 func ttfFontPath() string {
 	candidates := []string{
-		"/root/.config/pdfcpu/fonts/ArialUnicodeMS.ttf", // Docker (Linux)
+		"/root/.config/pdfcpu/fonts/ArialUnicodeMS.ttf", // Docker (Linux) — hardcoded absolute
+		"/Library/Fonts/Arial Unicode.ttf",              // macOS system
 	}
-	if home, err := os.UserHomeDir(); err == nil {
+	// Also try relative to font.UserFontDir (set by initPDFCPUFonts).
+	if font.UserFontDir != "" {
+		candidates = append([]string{filepath.Join(font.UserFontDir, "ArialUnicodeMS.ttf")}, candidates...)
+	}
+	// os.UserHomeDir() may return relative path in some Docker envs — guard with filepath.IsAbs.
+	if home, err := os.UserHomeDir(); err == nil && filepath.IsAbs(home) {
 		candidates = append(candidates,
 			filepath.Join(home, ".config", "pdfcpu", "fonts", "ArialUnicodeMS.ttf"),
 		)
 	}
-	candidates = append(candidates, "/Library/Fonts/Arial Unicode.ttf") // macOS system
 	for _, p := range candidates {
 		if _, err := os.Stat(p); err == nil {
 			return p
@@ -171,6 +176,9 @@ func initPDFCPUFonts() {
 // GenerateSignPage renders one PDF page ("Лист подписей") using gofpdf,
 // which handles Unicode/Cyrillic natively via embedded TTF.
 func GenerateSignPage(signatures []SignatureInfo) ([]byte, error) {
+	// Ensure font.UserFontDir is set before calling ttfFontPath().
+	initPDFCPUFonts()
+
 	fpdf := gofpdf.New("P", "mm", "A4", "")
 	fpdf.SetMargins(10, 10, 10)
 	fpdf.SetAutoPageBreak(true, 10)
