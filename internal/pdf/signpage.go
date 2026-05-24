@@ -73,6 +73,29 @@ func formatDate(t time.Time) string {
 	return t.Format("02.01.2006")
 }
 
+// ── Font bytes cache ──────────────────────────────────────────────────────────
+
+var (
+	cachedFontBytes     []byte
+	cachedFontBytesOnce sync.Once
+	cachedFontBytesErr  error
+)
+
+func loadFontBytes() ([]byte, error) {
+	cachedFontBytesOnce.Do(func() {
+		path := ttfFontPath()
+		if path == "" {
+			cachedFontBytesErr = fmt.Errorf("font not found")
+			return
+		}
+		cachedFontBytes, cachedFontBytesErr = os.ReadFile(path)
+		if cachedFontBytesErr == nil {
+			fmt.Printf("[pdf] font loaded into memory: %d bytes from %s\n", len(cachedFontBytes), path)
+		}
+	})
+	return cachedFontBytes, cachedFontBytesErr
+}
+
 // ── Font management (used by stamp.go via initPDFCPUFonts / cyrillicEnabled) ──
 
 var initFontsOnce sync.Once
@@ -188,49 +211,18 @@ func GenerateSignPage(signatures []SignatureInfo) ([]byte, error) {
 	const fontName = "Arial"
 	useCyrillic := false
 
-	// Try TTF candidates in order; use the first one that exists on disk.
-	ttfCandidates := []string{
-		"/root/.config/pdfcpu/fonts/ArialUnicodeMS.ttf",
-		"/Library/Fonts/Arial Unicode.ttf",
-	}
-	if ourFontDir != "" {
-		p := filepath.Join(ourFontDir, "ArialUnicodeMS.ttf")
-		ttfCandidates = append([]string{p}, ttfCandidates...)
-	}
-
-	var ttf string
-	for _, p := range ttfCandidates {
-		if !filepath.IsAbs(p) {
-			fmt.Printf("[pdf] gofpdf: skipping relative path %q\n", p)
-			continue
-		}
-		if _, err := os.Stat(p); err == nil {
-			ttf = p
-			break
-		}
-	}
-	fmt.Printf("[pdf] gofpdf: ourFontDir=%q ttf=%q\n", ourFontDir, ttf)
-
-	if ttf != "" {
-		// Use AddUTF8FontFromBytes to bypass gofpdf's internal path manipulation
-		// (it strips leading '/' when concatenating fontpath+fileStr).
-		fontBytes, readErr := os.ReadFile(ttf)
-		if readErr != nil {
-			fmt.Printf("[pdf] gofpdf: os.ReadFile(%q) error: %v, falling back to Helvetica\n", ttf, readErr)
+	if fb, err := loadFontBytes(); err == nil {
+		fpdf.AddUTF8FontFromBytes(fontName, "", fb)
+		if fpdf.Error() == nil {
+			useCyrillic = true
 		} else {
-			fpdf.AddUTF8FontFromBytes(fontName, "", fontBytes)
-			if fpdf.Error() == nil {
-				useCyrillic = true
-				fmt.Printf("[pdf] gofpdf: AddUTF8FontFromBytes OK, size=%d\n", len(fontBytes))
-			} else {
-				fmt.Printf("[pdf] gofpdf AddUTF8FontFromBytes error: %v, falling back to Helvetica\n", fpdf.Error())
-				fpdf = gofpdf.New("P", "mm", "A4", "")
-				fpdf.SetMargins(10, 10, 10)
-				fpdf.SetAutoPageBreak(true, 10)
-			}
+			fmt.Printf("[pdf] gofpdf AddUTF8FontFromBytes error: %v, falling back to Helvetica\n", fpdf.Error())
+			fpdf = gofpdf.New("P", "mm", "A4", "")
+			fpdf.SetMargins(10, 10, 10)
+			fpdf.SetAutoPageBreak(true, 10)
 		}
 	} else {
-		fmt.Printf("[pdf] gofpdf: no TTF found, using Helvetica fallback\n")
+		fmt.Printf("[pdf] gofpdf: font not available (%v), using Helvetica fallback\n", err)
 	}
 
 	// gofpdf UTF8 fonts don't support bold style unless registered separately.
