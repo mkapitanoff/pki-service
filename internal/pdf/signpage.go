@@ -171,33 +171,38 @@ func initPDFCPUFonts() {
 // GenerateSignPage renders one PDF page ("Лист подписей") using gofpdf,
 // which handles Unicode/Cyrillic natively via embedded TTF.
 func GenerateSignPage(signatures []SignatureInfo) ([]byte, error) {
-	pdf := gofpdf.New("P", "mm", "A4", "")
-	pdf.SetMargins(10, 10, 10)
-	pdf.SetAutoPageBreak(true, 10)
+	fpdf := gofpdf.New("P", "mm", "A4", "")
+	fpdf.SetMargins(10, 10, 10)
+	fpdf.SetAutoPageBreak(true, 10)
 
 	const fontName = "Arial"
+	useCyrillic := false
 	ttf := ttfFontPath()
 	if ttf != "" {
-		pdf.AddUTF8Font(fontName, "", ttf)
-	}
-	if pdf.Error() != nil || ttf == "" {
-		// No Unicode font available — fall back to built-in Helvetica.
+		fpdf.AddUTF8Font(fontName, "", ttf)
+		if fpdf.Error() == nil {
+			useCyrillic = true
+		} else {
+			// AddUTF8Font failed — recreate a clean object and use Helvetica.
+			fmt.Printf("[pdf] gofpdf AddUTF8Font error: %v, falling back to Helvetica\n", fpdf.Error())
+			fpdf = gofpdf.New("P", "mm", "A4", "")
+			fpdf.SetMargins(10, 10, 10)
+			fpdf.SetAutoPageBreak(true, 10)
+		}
+	} else {
 		fmt.Printf("[pdf] gofpdf: no TTF found, using Helvetica fallback\n")
 	}
 
-	useCyrillic := ttf != "" && pdf.Error() == nil
-
-	setFont := func(size float64, bold bool) {
-		style := ""
-		if bold {
-			style = "B"
-		}
+	// gofpdf UTF8 fonts don't support bold style unless registered separately.
+	// We use size variation instead: headers get larger size, not bold.
+	setFont := func(size float64, _ bool) {
 		if useCyrillic {
-			pdf.SetFont(fontName, style, size)
+			fpdf.SetFont(fontName, "", size)
 		} else {
-			pdf.SetFont("Helvetica", style, size)
+			fpdf.SetFont("Helvetica", "", size)
 		}
 	}
+	pdf := fpdf
 
 	pdf.AddPage()
 	pageW, _ := pdf.GetPageSize()
