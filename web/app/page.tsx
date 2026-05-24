@@ -1,8 +1,7 @@
 "use client";
 
 import { useState, useRef, DragEvent, ChangeEvent } from "react";
-import Link from "next/link";
-import { Upload, FileText, Loader2, AlertCircle, X, CheckCircle2, ExternalLink } from "lucide-react";
+import { Upload, FileText, Loader2, AlertCircle, X, CheckCircle2, ExternalLink, Download } from "lucide-react";
 import clsx from "clsx";
 import { demoUpload, signDocument, getAuthToken, API_BASE } from "@/lib/api";
 import { signMultiple } from "@/lib/ncalayer";
@@ -24,6 +23,7 @@ type FileEntry = {
   error?: string;
   documentId?: string;
   base64?: string;
+  role?: string; // role used when signing
 };
 
 type Phase = "select" | "uploading" | "signing" | "done" | "error";
@@ -38,6 +38,18 @@ const STATUS_LABEL: Record<FileStatus, string> = {
   error:        "Ошибка",
 };
 
+const ROLE_OPTIONS = [
+  { value: "client",      label: "Клиент" },
+  { value: "factor",      label: "Фактор" },
+  { value: "director",    label: "Директор" },
+  { value: "accountant",  label: "Бухгалтер" },
+  { value: "signatory",   label: "Уполномоченное лицо" },
+];
+
+function roleLabel(role: string): string {
+  return ROLE_OPTIONS.find((o) => o.value === role)?.label ?? role;
+}
+
 function localId(): string {
   return Math.random().toString(36).slice(2);
 }
@@ -48,6 +60,7 @@ function UploadPage() {
   const [files, setFiles] = useState<FileEntry[]>([]);
   const [phase, setPhase] = useState<Phase>("select");
   const [globalError, setGlobalError] = useState<string | null>(null);
+  const [role, setRole] = useState("client");
 
   // ── File selection ─────────────────────────────────────────────
   const addFiles = (incoming: FileList | File[]) => {
@@ -77,6 +90,22 @@ function UploadPage() {
   // ── Update single entry ────────────────────────────────────────
   const update = (id: string, patch: Partial<FileEntry>) =>
     setFiles((prev) => prev.map((f) => (f.id === id ? { ...f, ...patch } : f)));
+
+  // ── Download signed PDF ────────────────────────────────────────
+  const downloadPdf = async (documentId: string, fileName: string) => {
+    const token = getAuthToken();
+    const res = await fetch(`${API_BASE}/api/demo/download/${documentId}`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+    if (!res.ok) return;
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = fileName.replace(/\.pdf$/i, "") + "_signed.pdf";
+    a.click();
+    URL.revokeObjectURL(url);
+  };
 
   // ── Main flow ──────────────────────────────────────────────────
   const run = async () => {
@@ -142,14 +171,20 @@ function UploadPage() {
       }
       update(entry.id, { status: "signing" });
       try {
-        await signDocument(entry.documentId!, cms, "client");
-        update(entry.id, { status: "signed" });
+        await signDocument(entry.documentId!, cms, role);
+        update(entry.id, { status: "signed", role });
       } catch (e) {
         update(entry.id, { status: "error", error: e instanceof Error ? e.message : "Ошибка" });
       }
     }
 
     setPhase("done");
+  };
+
+  const reset = () => {
+    setFiles([]);
+    setPhase("select");
+    setGlobalError(null);
   };
 
   const canStart = files.length > 0 && phase === "select";
@@ -233,18 +268,35 @@ function UploadPage() {
                       <Loader2 className="w-3 h-3 animate-spin" />
                     )}
                     {entry.status === "signed" && <CheckCircle2 className="w-3 h-3" />}
-                    {entry.status === "error" ? entry.error : STATUS_LABEL[entry.status]}
+                    {entry.status === "error"
+                      ? entry.error
+                      : entry.status === "signed" && entry.role
+                        ? `Подписан (${roleLabel(entry.role)})`
+                        : STATUS_LABEL[entry.status]}
                   </span>
 
-                  {/* Link to document */}
+                  {/* Open in new tab */}
                   {entry.status === "signed" && entry.documentId && (
-                    <Link
+                    <a
                       href={`/document/${entry.documentId}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
                       className="shrink-0 text-[#0070f3] hover:text-blue-800"
                       title="Открыть документ"
                     >
                       <ExternalLink className="w-4 h-4" />
-                    </Link>
+                    </a>
+                  )}
+
+                  {/* Download signed PDF */}
+                  {entry.status === "signed" && entry.documentId && (
+                    <button
+                      onClick={() => downloadPdf(entry.documentId!, entry.file.name)}
+                      className="shrink-0 text-zinc-400 hover:text-zinc-700 transition-colors"
+                      title="Скачать PDF"
+                    >
+                      <Download className="w-4 h-4" />
+                    </button>
                   )}
 
                   {/* Remove button */}
@@ -280,7 +332,23 @@ function UploadPage() {
           {phase === "done" && (
             <div className="flex items-center gap-2 bg-green-50 rounded-lg px-3 py-2 text-sm text-green-700">
               <CheckCircle2 className="w-4 h-4" />
-              Все документы обработаны. Нажмите на иконку для просмотра.
+              Все документы обработаны. Нажмите на иконку для просмотра или скачивания.
+            </div>
+          )}
+
+          {/* Role selector */}
+          {(phase === "select" || phase === "error") && files.length > 0 && (
+            <div className="flex items-center gap-3">
+              <label className="text-sm text-zinc-600 shrink-0">Роль подписанта:</label>
+              <select
+                value={role}
+                onChange={(e) => setRole(e.target.value)}
+                className="flex-1 text-sm border border-zinc-300 rounded-lg px-3 py-2 bg-white text-zinc-800 focus:outline-none focus:ring-2 focus:ring-[#0070f3]"
+              >
+                {ROLE_OPTIONS.map((o) => (
+                  <option key={o.value} value={o.value}>{o.label}</option>
+                ))}
+              </select>
             </div>
           )}
 
@@ -305,10 +373,10 @@ function UploadPage() {
               </button>
             )}
 
-            {phase === "done" && (
+            {(phase === "done" || phase === "error") && (
               <button
                 type="button"
-                onClick={() => { setFiles([]); setPhase("select"); setGlobalError(null); }}
+                onClick={reset}
                 className="flex-1 py-3 rounded-xl font-semibold text-zinc-700 border border-zinc-300 hover:border-zinc-400 transition-colors"
               >
                 Загрузить ещё
