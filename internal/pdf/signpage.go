@@ -255,7 +255,7 @@ const (
 
 	spTitlePt  = 13
 	spSubtitPt = 10
-	spHeaderPt = 11 // "✓ ДОКУМЕНТ ПОДПИСАН ЭЦП"
+	spHeaderPt = 11 // "ДОКУМЕНТ ПОДПИСАН ЭЦП"
 	spBodyPt   = 9
 	spSmallPt  = 7
 
@@ -311,7 +311,7 @@ func GenerateSignPage(signatures []SignatureInfo) ([]byte, error) {
 		st.txt("проверки", spMargin+14, blockTop+spQRSize+4+spSmallPt+2, spSmallPt, colorGray, false)
 
 		// ── Block header ──────────────────────────────────────
-		st.txt("✓ ДОКУМЕНТ ПОДПИСАН ЭЦП", spTextX, y, spHeaderPt, colorGreen, false)
+		st.txt("ДОКУМЕНТ ПОДПИСАН ЭЦП", spTextX, y, spHeaderPt, colorGreen, false)
 		y += spHdrLH
 
 		st.txt(fmt.Sprintf("Дата подписания:  %s", formatTS(s.SignedAt)), spTextX, y, spBodyPt, colorBlack, false)
@@ -362,7 +362,7 @@ func GenerateSignPage(signatures []SignatureInfo) ([]byte, error) {
 		y += spLineH
 		st.txt(fmt.Sprintf("Хэш SHA-256:      %s", TruncateSHA256(s.SHA256Hash)), spTextX, y, spBodyPt, colorBlack, false)
 		y += spLineH
-		st.txt(fmt.Sprintf("Статус:           %s ✓", s.Status), spTextX, y, spBodyPt, colorGreen, false)
+		st.txt(fmt.Sprintf("Статус:           %s", s.Status), spTextX, y, spBodyPt, colorGreen, false)
 		y += spLineH
 
 		// Y не должен быть выше нижнего края QR
