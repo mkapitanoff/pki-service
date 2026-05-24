@@ -42,6 +42,17 @@ const STATUS_LABEL: Record<DocStatus, string> = {
   error:      "Ошибка",
 };
 
+function arrayBufferToBase64(buffer: ArrayBuffer): string {
+  const bytes = new Uint8Array(buffer);
+  let binary = "";
+  const chunkSize = 8192;
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    const chunk = bytes.subarray(i, i + chunkSize);
+    binary += String.fromCharCode(...chunk);
+  }
+  return btoa(binary);
+}
+
 async function fetchBase64(documentId: string): Promise<string> {
   const token = getAuthToken();
   const res = await fetch(`${API_BASE}/api/v1/documents/${documentId}/file`, {
@@ -49,7 +60,7 @@ async function fetchBase64(documentId: string): Promise<string> {
   });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   const arrayBuffer = await res.arrayBuffer();
-  return btoa(String.fromCharCode(...new Uint8Array(arrayBuffer)));
+  return arrayBufferToBase64(arrayBuffer);
 }
 
 async function downloadFile(documentId: string, filename: string) {

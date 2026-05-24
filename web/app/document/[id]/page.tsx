@@ -208,9 +208,12 @@ function DocumentPageInner({ id }: { id: string }) {
         .then(r => r.arrayBuffer())
         .then(buf => {
           const bytes = new Uint8Array(buf);
-          let b64 = "";
-          for (let i = 0; i < bytes.length; i++) b64 += String.fromCharCode(bytes[i]);
-          const encoded = btoa(b64);
+          let binary = "";
+          const chunkSize = 8192;
+          for (let i = 0; i < bytes.length; i += chunkSize) {
+            binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
+          }
+          const encoded = btoa(binary);
           console.log("docBase64 loaded, length:", encoded.length);
           setDocBase64(encoded);
         })
