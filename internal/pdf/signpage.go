@@ -391,33 +391,44 @@ func GenerateSignPage(signatures []SignatureInfo) ([]byte, error) {
 
 // ── ReplaceLastPage ───────────────────────────────────────────────────────────
 
-// ReplaceLastPage drops the last page of pdfBytes and appends newPageBytes.
-func ReplaceLastPage(pdfBytes []byte, newPageBytes []byte) ([]byte, error) {
+// StripLastPage removes the last page from a PDF.
+// Returns pdfBytes unchanged if the document has only one page.
+func StripLastPage(pdfBytes []byte) ([]byte, error) {
 	conf := model.NewDefaultConfiguration()
-
 	count, err := api.PageCount(bytes.NewReader(pdfBytes), conf)
 	if err != nil {
 		return nil, fmt.Errorf("pdf: page count: %w", err)
 	}
 	if count <= 1 {
-		cp := make([]byte, len(newPageBytes))
-		copy(cp, newPageBytes)
-		return cp, nil
+		return pdfBytes, nil
 	}
-
 	var trimmed bytes.Buffer
 	keep := fmt.Sprintf("1-%d", count-1)
 	if err := api.Trim(bytes.NewReader(pdfBytes), &trimmed, []string{keep}, conf); err != nil {
-		return nil, fmt.Errorf("pdf: trim last page: %w", err)
+		return nil, fmt.Errorf("pdf: strip last page: %w", err)
 	}
+	return trimmed.Bytes(), nil
+}
 
-	var out bytes.Buffer
-	rss := []io.ReadSeeker{
-		bytes.NewReader(trimmed.Bytes()),
-		bytes.NewReader(newPageBytes),
+// ReplaceLastPage appends signPageBytes to docBytes (always merges as last page).
+// The caller is responsible for stripping any existing sign page before calling
+// this function (use StripLastPage for subsequent signings).
+func ReplaceLastPage(docBytes []byte, signPageBytes []byte) ([]byte, error) {
+	conf := model.NewDefaultConfiguration()
+	conf.ValidationMode = model.ValidationRelaxed
+
+	var result bytes.Buffer
+	err := api.MergeRaw(
+		[]io.ReadSeeker{
+			bytes.NewReader(docBytes),
+			bytes.NewReader(signPageBytes),
+		},
+		&result,
+		false,
+		conf,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("merge sign page: %w", err)
 	}
-	if err := api.MergeRaw(rss, &out, false, conf); err != nil {
-		return nil, fmt.Errorf("pdf: merge new last page: %w", err)
-	}
-	return out.Bytes(), nil
+	return result.Bytes(), nil
 }

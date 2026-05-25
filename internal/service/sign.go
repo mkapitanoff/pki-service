@@ -206,7 +206,21 @@ func (s *SignService) Sign(ctx context.Context, input SignInput) (*SignResult, e
 			QRImagePNG: sigInfos[i].QRImagePNG,
 		})
 	}
-	stamped, err := pdf.AddQRStamps(pdfBytes, stamps)
+
+	// For subsequent signings the current PDF already has a sign page as its
+	// last page. Strip it before re-stamping so QR stamps are not applied to
+	// the old sign page and the page count stays correct.
+	basePDF := pdfBytes
+	if doc.CurrentVersion > 0 {
+		stripped, serr := pdf.StripLastPage(pdfBytes)
+		if serr != nil {
+			fmt.Printf("[sign] warning: StripLastPage failed (%v), proceeding with full PDF\n", serr)
+		} else {
+			basePDF = stripped
+		}
+	}
+
+	stamped, err := pdf.AddQRStamps(basePDF, stamps)
 	if err != nil {
 		fmt.Printf("[sign] error at step 15a (AddQRStamps): %v\n", err)
 		return nil, apperr.ErrInternal.WithCause(err)
