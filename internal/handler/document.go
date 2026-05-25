@@ -93,9 +93,9 @@ func (h *DocumentHandler) HandleUploadDocument(w http.ResponseWriter, r *http.Re
 		TenantID:   tenantID,
 		Sha256Hash: docSHA256,
 	})
-	if err == nil {
-		// Found existing document — fetch its signatures and return.
-		fmt.Printf("[upload] SHA256 match: doc=%s tenant=%s\n", existing.ID, tenantID)
+	if err == nil && existing.Status != repository.DocStatusDraft {
+		// Found existing signed/partially_signed document — return it as duplicate.
+		fmt.Printf("[upload] SHA256 match (dedup): doc=%s status=%s tenant=%s\n", existing.ID, existing.Status, tenantID)
 		dbSigs, _ := h.queries.GetSignaturesByDocument(r.Context(), repository.GetSignaturesByDocumentParams{
 			DocumentID: existing.ID,
 			TenantID:   tenantID,
@@ -124,6 +124,7 @@ func (h *DocumentHandler) HandleUploadDocument(w http.ResponseWriter, r *http.Re
 		respondJSON(w, http.StatusCreated, map[string]any{"data": respData})
 		return
 	}
+	// If found but status is "draft" (no signatures yet) — fall through and create a new document.
 
 	// ── New document ──────────────────────────────────────────────────────────
 	pathID := uuid.New()
