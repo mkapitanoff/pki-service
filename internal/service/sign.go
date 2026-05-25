@@ -210,8 +210,9 @@ func (s *SignService) Sign(ctx context.Context, input SignInput) (*SignResult, e
 	// For subsequent signings the current PDF already has a sign page as its
 	// last page. Strip it before re-stamping so QR stamps are not applied to
 	// the old sign page and the page count stays correct.
+	// Check by existing signatures count — not CurrentVersion, which starts at 0.
 	basePDF := pdfBytes
-	if doc.CurrentVersion > 0 {
+	if len(existing) > 0 {
 		stripped, serr := pdf.StripLastPage(pdfBytes)
 		if serr != nil {
 			fmt.Printf("[sign] warning: StripLastPage failed (%v), proceeding with full PDF\n", serr)
@@ -236,6 +237,10 @@ func (s *SignService) Sign(ctx context.Context, input SignInput) (*SignResult, e
 		return nil, apperr.ErrInternal.WithCause(err)
 	}
 	fmt.Printf("[sign] step 15 OK: final PDF %d bytes\n", len(finalPDF))
+
+	// 15d. SHA256 of the final (signed) PDF — stored for dedup of signed files.
+	finalSum := sha256.Sum256(finalPDF)
+	finalSHA256 := hex.EncodeToString(finalSum[:])
 
 	// 16. New s3 key.
 	newKey := s.storage.BuildKey(input.TenantID, input.DocumentID,
@@ -311,11 +316,12 @@ func (s *SignService) Sign(ctx context.Context, input SignInput) (*SignResult, e
 
 	// 18c. UPDATE document (sqlc).
 	if _, err = qtx.UpdateDocumentVersion(ctx, repository.UpdateDocumentVersionParams{
-		ID:             input.DocumentID,
-		TenantID:       input.TenantID,
-		S3KeyCurrent:   newKey,
-		CurrentVersion: newVersion,
-		Status:         newStatus,
+		ID:               input.DocumentID,
+		TenantID:         input.TenantID,
+		S3KeyCurrent:     newKey,
+		CurrentVersion:   newVersion,
+		Status:           newStatus,
+		Sha256HashCurrent: finalSHA256,
 	}); err != nil {
 		fmt.Printf("[sign] error at step 18c (update document): %v\n", err)
 		return nil, apperr.ErrInternal.WithCause(err)

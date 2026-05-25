@@ -16,6 +16,12 @@ WHERE tenant_id = $1 AND sha256_hash = $2
 ORDER BY created_at DESC
 LIMIT 1;
 
+-- name: GetDocumentByCurrentSHA256 :one
+SELECT * FROM documents
+WHERE tenant_id = $1 AND sha256_hash_current = $2 AND status != 'draft'
+ORDER BY created_at DESC
+LIMIT 1;
+
 -- name: UpdateDocumentStatus :one
 UPDATE documents
 SET status = $3, updated_at = now()
@@ -24,7 +30,7 @@ RETURNING *;
 
 -- name: UpdateDocumentVersion :one
 UPDATE documents
-SET s3_key_current = $3, current_version = $4, status = $5, updated_at = now()
+SET s3_key_current = $3, current_version = $4, status = $5, sha256_hash_current = $6, updated_at = now()
 WHERE id = $1 AND tenant_id = $2
 RETURNING *;
 

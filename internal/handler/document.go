@@ -93,11 +93,11 @@ func (h *DocumentHandler) HandleUploadDocument(w http.ResponseWriter, r *http.Re
 		TenantID:   tenantID,
 		Sha256Hash: docSHA256,
 	})
-	if err == nil && existing.Status != repository.DocStatusDraft {
-		// Found existing signed/partially_signed document — return it as duplicate.
-		fmt.Printf("[upload] SHA256 match (dedup): doc=%s status=%s tenant=%s\n", existing.ID, existing.Status, tenantID)
+	// Helper: respond with deduplicated document.
+	respondDedup := func(doc repository.Document) {
+		fmt.Printf("[upload] dedup: doc=%s status=%s tenant=%s\n", doc.ID, doc.Status, tenantID)
 		dbSigs, _ := h.queries.GetSignaturesByDocument(r.Context(), repository.GetSignaturesByDocumentParams{
-			DocumentID: existing.ID,
+			DocumentID: doc.ID,
 			TenantID:   tenantID,
 		})
 		var existingSigs []existingSigInfo
@@ -110,21 +110,36 @@ func (h *DocumentHandler) HandleUploadDocument(w http.ResponseWriter, r *http.Re
 			})
 		}
 		respData := map[string]any{
-			"document_id":  existing.ID,
-			"title":        existing.Title.String,
+			"document_id":  doc.ID,
+			"title":        doc.Title.String,
 			"sha256_hash":  docSHA256,
-			"status":       existing.Status,
-			"sign_url":     fmt.Sprintf("%s/document/%s", h.verifyBaseURL, existing.ID),
-			"callback_url": existing.CallbackUrl.String,
+			"status":       doc.Status,
+			"sign_url":     fmt.Sprintf("%s/document/%s", h.verifyBaseURL, doc.ID),
+			"callback_url": doc.CallbackUrl.String,
 			"deduplicated": true,
 		}
 		if len(existingSigs) > 0 {
 			respData["existing_signatures"] = existingSigs
 		}
 		respondJSON(w, http.StatusCreated, map[string]any{"data": respData})
+	}
+
+	// Check 1: SHA256 of the original PDF matches a signed/partially_signed document.
+	if err == nil && existing.Status != repository.DocStatusDraft {
+		respondDedup(existing)
 		return
 	}
 	// If found but status is "draft" (no signatures yet) — fall through and create a new document.
+
+	// Check 2: SHA256 matches sha256_hash_current of an already-signed document
+	// (user uploaded a signed PDF that we produced — its hash differs from the original).
+	if cur, cerr := h.queries.GetDocumentByCurrentSHA256(r.Context(), repository.GetDocumentByCurrentSHA256Params{
+		TenantID:         tenantID,
+		Sha256HashCurrent: docSHA256,
+	}); cerr == nil {
+		respondDedup(cur)
+		return
+	}
 
 	// ── New document ──────────────────────────────────────────────────────────
 	pathID := uuid.New()

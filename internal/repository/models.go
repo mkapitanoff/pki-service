@@ -176,18 +176,19 @@ type AuthToken struct {
 }
 
 type Document struct {
-	ID             uuid.UUID             `json:"id"`
-	TenantID       uuid.UUID             `json:"tenant_id"`
-	Title          sql.NullString        `json:"title"`
-	S3KeyOriginal  string                `json:"s3_key_original"`
-	S3KeyCurrent   string                `json:"s3_key_current"`
-	CurrentVersion int32                 `json:"current_version"`
-	Status         DocStatus             `json:"status"`
-	Metadata       pqtype.NullRawMessage `json:"metadata"`
-	CreatedAt      time.Time             `json:"created_at"`
-	UpdatedAt      time.Time             `json:"updated_at"`
-	CallbackUrl    sql.NullString        `json:"callback_url"`
-	Sha256Hash     string                `json:"sha256_hash"`
+	ID                uuid.UUID             `json:"id"`
+	TenantID          uuid.UUID             `json:"tenant_id"`
+	Title             sql.NullString        `json:"title"`
+	S3KeyOriginal     string                `json:"s3_key_original"`
+	S3KeyCurrent      string                `json:"s3_key_current"`
+	CurrentVersion    int32                 `json:"current_version"`
+	Status            DocStatus             `json:"status"`
+	Metadata          pqtype.NullRawMessage `json:"metadata"`
+	CreatedAt         time.Time             `json:"created_at"`
+	UpdatedAt         time.Time             `json:"updated_at"`
+	CallbackUrl       sql.NullString        `json:"callback_url"`
+	Sha256Hash        string                `json:"sha256_hash"`
+	Sha256HashCurrent string                `json:"sha256_hash_current"`
 }
 
 type DocumentVersion struct {
