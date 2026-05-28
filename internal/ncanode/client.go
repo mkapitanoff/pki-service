@@ -143,11 +143,46 @@ type tspCreateResponse struct {
 	TSP     *ncaTSP `json:"tsp"`
 }
 
+// normalizeCMS converts a CMS string to standard Base64 expected by NCANode:
+//   - strips PEM headers/footers (-----BEGIN/END CMS-----)
+//   - converts Base64URL characters: '-' → '+', '_' → '/'
+//   - removes all whitespace (newlines, spaces)
+func normalizeCMS(cms string) string {
+	s := cms
+	// Strip PEM wrapper if present.
+	if idx := strings.Index(s, "-----BEGIN"); idx != -1 {
+		// Extract only the Base64 body between the header and footer lines.
+		lines := strings.Split(s, "\n")
+		var body []string
+		inBody := false
+		for _, line := range lines {
+			line = strings.TrimSpace(line)
+			if strings.HasPrefix(line, "-----BEGIN") {
+				inBody = true
+				continue
+			}
+			if strings.HasPrefix(line, "-----END") {
+				break
+			}
+			if inBody {
+				body = append(body, line)
+			}
+		}
+		s = strings.Join(body, "")
+	}
+	// Remove all whitespace.
+	s = strings.Join(strings.Fields(s), "")
+	// Convert Base64URL → standard Base64.
+	s = strings.ReplaceAll(s, "-", "+")
+	s = strings.ReplaceAll(s, "_", "/")
+	return s
+}
+
 // VerifyCMS posts the CMS + document hash to {url}/cms/verify and normalizes
 // the response. Returns ErrCMSInvalid / ErrCertRevoked for business failures.
 func (c *HTTPClient) VerifyCMS(ctx context.Context, cmsBase64 string, docSHA256 string) (*VerifyResult, error) {
 	var resp cmsVerifyResponse
-	if err := c.postJSON(ctx, "/cms/verify", cmsVerifyRequest{CMS: cmsBase64, Data: docSHA256}, &resp); err != nil {
+	if err := c.postJSON(ctx, "/cms/verify", cmsVerifyRequest{CMS: normalizeCMS(cmsBase64), Data: docSHA256}, &resp); err != nil {
 		return nil, err
 	}
 
