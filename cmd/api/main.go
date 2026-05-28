@@ -75,6 +75,7 @@ func main() {
 	verifyHandler := handler.NewVerifyHandler(queries)
 	demoHandler := handler.NewDemoHandler(queries, store)
 	documentHandler := handler.NewDocumentHandler(queries, store, cfg.App.VerifyBaseURL, ncClient)
+	batchHandler := handler.NewBatchHandler(signSvc, queries, store, cfg.App.VerifyBaseURL, ncClient)
 	adminHandler := handler.NewAdminHandler(queries, authSvc)
 
 	r := chi.NewRouter()
@@ -157,6 +158,10 @@ func main() {
 		// Production upload/download — paths avoid {id} wildcard conflict.
 		api.Post("/upload", documentHandler.HandleUploadDocument)
 		api.Get("/documents/{id}/file", documentHandler.HandleDownloadDocument)
+
+		// Batch endpoints.
+		api.Post("/batch/upload", batchHandler.HandleBatchUpload)
+		api.Post("/batch/sign", batchHandler.HandleBatchSign)
 	})
 
 	srv := &http.Server{
