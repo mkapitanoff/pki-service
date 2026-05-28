@@ -20,7 +20,6 @@ export default function TenantsPage() {
   const [error, setError] = useState('')
   const [showCreate, setShowCreate] = useState(false)
   const [newName, setNewName] = useState('')
-  const [newType, setNewType] = useState('legal_entity')
 
   useEffect(() => {
     const token = getAuthToken()
@@ -45,7 +44,7 @@ export default function TenantsPage() {
 
   async function createTenant() {
     try {
-      await adminCreateTenant(newName, newType)
+      await adminCreateTenant(newName, 'legal_entity')
       setShowCreate(false)
       setNewName('')
       loadTenants()
@@ -79,14 +78,6 @@ export default function TenantsPage() {
             value={newName}
             onChange={e => setNewName(e.target.value)}
           />
-          <select
-            className="border rounded px-3 py-2 w-full mb-3"
-            value={newType}
-            onChange={e => setNewType(e.target.value)}
-          >
-            <option value="legal_entity">Юридическое лицо</option>
-            <option value="individual">Физическое лицо</option>
-          </select>
           <div className="flex gap-2">
             <button onClick={createTenant} className="bg-blue-600 text-white px-4 py-2 rounded">Создать</button>
             <button onClick={() => setShowCreate(false)} className="border px-4 py-2 rounded">Отмена</button>
@@ -99,7 +90,6 @@ export default function TenantsPage() {
           <thead className="bg-gray-50">
             <tr>
               <th className="text-left p-4 font-medium">Название</th>
-              <th className="text-left p-4 font-medium">Тип</th>
               <th className="text-left p-4 font-medium">Статус</th>
               <th className="text-left p-4 font-medium">API ключей</th>
               <th className="text-left p-4 font-medium">Действия</th>
@@ -109,7 +99,6 @@ export default function TenantsPage() {
             {tenants.map(t => (
               <tr key={t.id} className="border-t">
                 <td className="p-4">{t.name}</td>
-                <td className="p-4">{t.type === 'legal_entity' ? 'Юр. лицо' : 'Физ. лицо'}</td>
                 <td className="p-4">
                   <span className={`px-2 py-1 rounded text-sm ${t.is_active ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
                     {t.is_active ? 'Активен' : 'Неактивен'}

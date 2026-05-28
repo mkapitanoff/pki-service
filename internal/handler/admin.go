@@ -66,7 +66,7 @@ func (h *AdminHandler) HandleCreateTenant(w http.ResponseWriter, r *http.Request
 	}
 	t := repository.TenantType(req.Type)
 	if t != repository.TenantTypeIndividual && t != repository.TenantTypeLegalEntity {
-		t = repository.TenantTypeIndividual
+		t = repository.TenantTypeLegalEntity
 	}
 	tenant, err := h.queries.CreateTenant(r.Context(), repository.CreateTenantParams{
 		Name: req.Name,
