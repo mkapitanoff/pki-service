@@ -64,8 +64,8 @@ func AddQRStamps(pdfBytes []byte, stamps []QRStamp) ([]byte, error) {
 			return nil, fmt.Errorf("pdf: write qr image: %w", err)
 		}
 		imgDesc := fmt.Sprintf(
-			"pos:bl, off:%d %d, scale:0.12 rel, rot:0, opacity:1",
-			xOff, stampMargin+12,
+			"pos:bl, off:%d %d, scale:%d abs, rot:0, opacity:1",
+			xOff, stampMargin+12, stampSizePt,
 		)
 		imgWM, err := pdfcpu.ParseImageWatermarkDetails(imgPath, imgDesc, true, types.POINTS)
 		if err != nil {

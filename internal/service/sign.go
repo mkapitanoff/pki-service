@@ -142,14 +142,19 @@ func (s *SignService) Sign(ctx context.Context, input SignInput) (*SignResult, e
 		fmt.Printf("[sign] error at step 9 (get signatures): %v\n", err)
 		return nil, apperr.ErrInternal.WithCause(err)
 	}
-	// 9a. Проверяем что этот ИИН ещё не подписывал.
+	// 9a. Проверяем что этот ИИН+роль ещё не подписывал (одна роль — одна подпись).
 	if vr.SignerIIN != "" {
 		for _, sig := range existing {
-			if sig.SignerIin.String == vr.SignerIIN {
-				fmt.Printf("[sign] duplicate IIN detected: %s\n", vr.SignerIIN)
+			if sig.SignerIin.String == vr.SignerIIN && sig.Role == input.Role {
+				fmt.Printf("[sign] duplicate IIN+role detected: %s role=%s\n", vr.SignerIIN, input.Role)
 				return nil, apperr.ErrAlreadySigned
 			}
 		}
+	}
+
+	// 9b. Максимум 5 подписей на документ.
+	if len(existing) >= 5 {
+		return nil, apperr.ErrAlreadySigned
 	}
 
 	sequenceNum := int32(len(existing) + 1)
