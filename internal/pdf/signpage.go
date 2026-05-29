@@ -22,7 +22,8 @@ type SignatureInfo struct {
 	OrgName       string
 	BIN           string
 	IIN           string // raw IIN; rendered via MaskIIN
-	SignerType    string
+	Role          string // signing role: client, factor, director, etc.
+	SignerType    string // from NCANode: individual, legal_entity_rep
 	Basis         string
 	CertSerial    string // raw serial; rendered via TruncateCertSerial
 	CertNotBefore time.Time
@@ -33,6 +34,41 @@ type SignatureInfo struct {
 	Status        string
 	SignedAt      time.Time
 	QRImagePNG    []byte
+}
+
+// RoleLabel maps internal role codes to Russian labels.
+func RoleLabel(role string) string {
+	switch role {
+	case "client":
+		return "Клиент"
+	case "factor":
+		return "Фактор"
+	case "director":
+		return "Директор"
+	case "accountant":
+		return "Бухгалтер"
+	case "signatory":
+		return "Уполномоченное лицо"
+	case "external":
+		return "Внешняя подпись"
+	default:
+		if role != "" {
+			return role
+		}
+		return ""
+	}
+}
+
+// SignerTypeLabel maps NCANode signer type codes to Russian labels.
+func SignerTypeLabel(signerType string) string {
+	switch signerType {
+	case "individual":
+		return "Физическое лицо"
+	case "legal_entity_rep":
+		return "Представитель юр. лица"
+	default:
+		return signerType
+	}
 }
 
 // MaskIIN masks an IIN: first 4 + "****" + last 4.
@@ -311,8 +347,11 @@ func GenerateSignPage(signatures []SignatureInfo) ([]byte, error) {
 		if s.IIN != "" && s.IIN != "—" {
 			rows = append(rows, row{"ИИН:", MaskIIN(s.IIN)})
 		}
-		if s.SignerType != "" {
-			rows = append(rows, row{"Тип:", s.SignerType})
+		if rl := RoleLabel(s.Role); rl != "" {
+			rows = append(rows, row{"Роль:", rl})
+		}
+		if st := SignerTypeLabel(s.SignerType); st != "" {
+			rows = append(rows, row{"Тип:", st})
 		}
 		if s.Basis != "" && s.Basis != "—" {
 			rows = append(rows, row{"Основание:", s.Basis})

@@ -142,17 +142,7 @@ func (s *SignService) Sign(ctx context.Context, input SignInput) (*SignResult, e
 		fmt.Printf("[sign] error at step 9 (get signatures): %v\n", err)
 		return nil, apperr.ErrInternal.WithCause(err)
 	}
-	// 9a. Проверяем что этот ИИН+роль ещё не подписывал (одна роль — одна подпись).
-	if vr.SignerIIN != "" {
-		for _, sig := range existing {
-			if sig.SignerIin.String == vr.SignerIIN && sig.Role == input.Role {
-				fmt.Printf("[sign] duplicate IIN+role detected: %s role=%s\n", vr.SignerIIN, input.Role)
-				return nil, apperr.ErrAlreadySigned
-			}
-		}
-	}
-
-	// 9b. Максимум 5 подписей на документ.
+	// 9a. Максимум 5 подписей на документ.
 	if len(existing) >= 5 {
 		return nil, apperr.ErrAlreadySigned
 	}
@@ -188,6 +178,7 @@ func (s *SignService) Sign(ctx context.Context, input SignInput) (*SignResult, e
 		OrgName:       vr.OrgName,
 		BIN:           vr.SignerBIN,
 		IIN:           vr.SignerIIN,
+		Role:          input.Role,
 		SignerType:    vr.SignerType,
 		Basis:         vr.Basis,
 		CertSerial:    vr.CertSerial,
@@ -394,6 +385,7 @@ func signatureToInfo(s repository.Signature) pdf.SignatureInfo {
 		OrgName:       s.OrgName.String,
 		BIN:           s.SignerBin.String,
 		IIN:           s.SignerIin.String,
+		Role:          s.Role,
 		SignerType:    s.SignerType,
 		Basis:         s.Basis.String,
 		CertSerial:    s.CertSerial,
