@@ -20,8 +20,10 @@ import (
 	"github.com/mkapitanoff/pki-service/internal/handler"
 	"github.com/mkapitanoff/pki-service/internal/ncanode"
 	"github.com/mkapitanoff/pki-service/internal/repository"
+	"github.com/mkapitanoff/pki-service/internal/s3client"
 	"github.com/mkapitanoff/pki-service/internal/service"
 	"github.com/mkapitanoff/pki-service/internal/storage"
+	"github.com/mkapitanoff/pki-service/internal/worker"
 )
 
 func main() {
@@ -78,6 +80,33 @@ func main() {
 	batchHandler := handler.NewBatchHandler(signSvc, queries, store, cfg.App.VerifyBaseURL, ncClient)
 	adminHandler := handler.NewAdminHandler(queries, authSvc)
 
+	extS3 := s3client.NewHTTPExternalS3Client()
+	appHandler := handler.NewApplicationHandler(queries, signSvc, extS3)
+
+	// Workers.
+	workerCtx, cancelWorkers := context.WithCancel(context.Background())
+	appCfg := cfg.Applications
+	fetchInterval := time.Duration(appCfg.FetchIntervalSec) * time.Second
+	if fetchInterval <= 0 {
+		fetchInterval = 10 * time.Second
+	}
+	webhookInterval := time.Duration(appCfg.WebhookIntervalSec) * time.Second
+	if webhookInterval <= 0 {
+		webhookInterval = 5 * time.Second
+	}
+	docFetcher := worker.NewDocumentFetcher(worker.DocumentFetcherConfig{
+		FetchInterval:   fetchInterval,
+		FetchBatchSize:  appCfg.FetchBatchSize,
+		MaxFetchRetries: appCfg.MaxFetchRetries,
+	}, db, queries, store, extS3)
+	webhookDispatcher := worker.NewWebhookDispatcher(worker.WebhookDispatcherConfig{
+		Interval:    webhookInterval,
+		MaxAttempts: appCfg.WebhookMaxAttempts,
+	}, db, queries)
+	go docFetcher.Run(workerCtx)
+	go webhookDispatcher.Run(workerCtx)
+	_ = cancelWorkers // called on shutdown below
+
 	r := chi.NewRouter()
 
 	// CORS — must be first, before all other middleware and routes.
@@ -104,7 +133,20 @@ func main() {
 
 	r.Get("/health", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprintf(w, `{"status":"ok","env":"%s"}`, cfg.App.Env)
+		fetcherStatus := "running"
+		select {
+		case <-docFetcher.Running():
+			fetcherStatus = "stopped"
+		default:
+		}
+		dispatcherStatus := "running"
+		select {
+		case <-webhookDispatcher.Running():
+			dispatcherStatus = "stopped"
+		default:
+		}
+		fmt.Fprintf(w, `{"status":"ok","env":"%s","workers":{"document_fetcher":"%s","webhook_dispatcher":"%s"}}`,
+			cfg.App.Env, fetcherStatus, dispatcherStatus)
 	})
 
 	r.Group(func(pub chi.Router) {
@@ -162,6 +204,14 @@ func main() {
 		// Batch endpoints.
 		api.Post("/batch/upload", batchHandler.HandleBatchUpload)
 		api.Post("/batch/sign", batchHandler.HandleBatchSign)
+
+		// Applications endpoints.
+		api.Post("/applications/{external_id}/submit", appHandler.HandleSubmit)
+		api.Get("/applications/{external_id}/status", appHandler.HandleStatus)
+		api.Post("/applications/{external_id}/sign", appHandler.HandleSign)
+		api.Post("/applications/{external_id}/cancel", appHandler.HandleCancel)
+		api.Patch("/applications/{external_id}/refresh-urls", appHandler.HandleRefreshURLs)
+		api.Post("/applications/{external_id}/retry-upload", appHandler.HandleRetryUpload)
 	})
 
 	srv := &http.Server{
@@ -184,10 +234,11 @@ func main() {
 	<-quit
 
 	log.Println("Shutting down server...")
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
+	cancelWorkers()
+	shutCtx, shutCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer shutCancel()
 
-	if err := srv.Shutdown(ctx); err != nil {
+	if err := srv.Shutdown(shutCtx); err != nil {
 		log.Fatalf("Forced shutdown: %v", err)
 	}
 	log.Println("Server stopped")

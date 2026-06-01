@@ -58,15 +58,24 @@ type RateLimitConfig struct {
 	APIPerMinute    int `mapstructure:"api_per_minute"`
 }
 
+type ApplicationsConfig struct {
+	FetchIntervalSec   int `mapstructure:"fetch_interval_sec"`
+	FetchBatchSize     int `mapstructure:"fetch_batch_size"`
+	MaxFetchRetries    int `mapstructure:"max_fetch_retries"`
+	WebhookIntervalSec int `mapstructure:"webhook_interval_sec"`
+	WebhookMaxAttempts int `mapstructure:"webhook_max_attempts"`
+}
+
 type Config struct {
-	App       AppConfig       `mapstructure:"app"`
-	Database  DatabaseConfig  `mapstructure:"database"`
-	NCANode   NCANodeConfig   `mapstructure:"ncanode"`
-	Storage   StorageConfig   `mapstructure:"storage"`
-	Redis     RedisConfig     `mapstructure:"redis"`
-	RabbitMQ  RabbitMQConfig  `mapstructure:"rabbitmq"`
-	Log       LogConfig       `mapstructure:"log"`
-	RateLimit RateLimitConfig `mapstructure:"rate_limit"`
+	App          AppConfig          `mapstructure:"app"`
+	Database     DatabaseConfig     `mapstructure:"database"`
+	NCANode      NCANodeConfig      `mapstructure:"ncanode"`
+	Storage      StorageConfig      `mapstructure:"storage"`
+	Redis        RedisConfig        `mapstructure:"redis"`
+	RabbitMQ     RabbitMQConfig     `mapstructure:"rabbitmq"`
+	Log          LogConfig          `mapstructure:"log"`
+	RateLimit    RateLimitConfig    `mapstructure:"rate_limit"`
+	Applications ApplicationsConfig `mapstructure:"applications"`
 }
 
 // Load reads configs/config.{env}.yaml. ENV variables override yaml values

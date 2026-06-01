@@ -40,3 +40,10 @@ log:
 rate_limit:
   verify_per_minute: 60
   api_per_minute: 300
+
+applications:
+  fetch_interval_sec: 10
+  fetch_batch_size: 20
+  max_fetch_retries: 3
+  webhook_interval_sec: 5
+  webhook_max_attempts: 5

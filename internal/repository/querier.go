@@ -12,7 +12,11 @@ import (
 )
 
 type Querier interface {
+	CancelApplication(ctx context.Context, arg CancelApplicationParams) (Application, error)
 	CreateAPIKey(ctx context.Context, arg CreateAPIKeyParams) (ApiKey, error)
+	CreateApplication(ctx context.Context, arg CreateApplicationParams) (Application, error)
+	CreateApplicationDocument(ctx context.Context, arg CreateApplicationDocumentParams) (ApplicationDocument, error)
+	CreateApplicationWebhook(ctx context.Context, arg CreateApplicationWebhookParams) (ApplicationWebhook, error)
 	CreateAuditLog(ctx context.Context, arg CreateAuditLogParams) error
 	CreateAuthToken(ctx context.Context, arg CreateAuthTokenParams) (AuthToken, error)
 	CreateDocument(ctx context.Context, arg CreateDocumentParams) (Document, error)
@@ -26,12 +30,18 @@ type Querier interface {
 	DeleteAuthToken(ctx context.Context, tokenHash string) error
 	DeleteExpiredTokens(ctx context.Context) error
 	DeleteUser(ctx context.Context, id uuid.UUID) error
+	FindPreviousVersions(ctx context.Context, arg FindPreviousVersionsParams) ([]ApplicationDocument, error)
 	GetAPIKeyByHash(ctx context.Context, keyHash string) (ApiKey, error)
+	GetApplicationByExternalID(ctx context.Context, arg GetApplicationByExternalIDParams) (Application, error)
+	GetApplicationByID(ctx context.Context, arg GetApplicationByIDParams) (Application, error)
+	GetApplicationDocumentByID(ctx context.Context, id uuid.UUID) (ApplicationDocument, error)
 	GetAuthTokenByHash(ctx context.Context, tokenHash string) (AuthToken, error)
 	GetDocument(ctx context.Context, arg GetDocumentParams) (Document, error)
 	GetDocumentByCurrentSHA256(ctx context.Context, arg GetDocumentByCurrentSHA256Params) (Document, error)
 	GetDocumentBySHA256(ctx context.Context, arg GetDocumentBySHA256Params) (Document, error)
 	GetDocumentCallbackURL(ctx context.Context, id uuid.UUID) (sql.NullString, error)
+	GetPendingFetchDocuments(ctx context.Context, limit int32) ([]ApplicationDocument, error)
+	GetPendingWebhooks(ctx context.Context) ([]ApplicationWebhook, error)
 	GetSignature(ctx context.Context, arg GetSignatureParams) (Signature, error)
 	GetSignatureByIDPublic(ctx context.Context, id uuid.UUID) (Signature, error)
 	GetSignaturesByDocument(ctx context.Context, arg GetSignaturesByDocumentParams) ([]Signature, error)
@@ -41,16 +51,26 @@ type Querier interface {
 	GetWebhookByID(ctx context.Context, id uuid.UUID) (Webhook, error)
 	GetWebhookDeliveryByID(ctx context.Context, id uuid.UUID) (WebhookDelivery, error)
 	GetWebhooksByTenantAndEvent(ctx context.Context, arg GetWebhooksByTenantAndEventParams) ([]Webhook, error)
+	IncrementUploadAttempts(ctx context.Context, arg IncrementUploadAttemptsParams) (ApplicationDocument, error)
 	ListAPIKeysByTenant(ctx context.Context, tenantID uuid.UUID) ([]ApiKey, error)
+	ListActiveApplicationDocuments(ctx context.Context, arg ListActiveApplicationDocumentsParams) ([]ApplicationDocument, error)
+	ListApplicationDocuments(ctx context.Context, applicationID uuid.UUID) ([]ApplicationDocument, error)
 	ListTenantsWithKeyCount(ctx context.Context) ([]ListTenantsWithKeyCountRow, error)
 	ListUsers(ctx context.Context) ([]User, error)
+	MarkApplicationDocumentUploaded(ctx context.Context, id uuid.UUID) (ApplicationDocument, error)
+	SupersedeApplicationDocument(ctx context.Context, arg SupersedeApplicationDocumentParams) (ApplicationDocument, error)
 	UpdateAPIKeyLastUsed(ctx context.Context, id uuid.UUID) error
+	UpdateApplicationDocumentAfterFetch(ctx context.Context, arg UpdateApplicationDocumentAfterFetchParams) (ApplicationDocument, error)
+	UpdateApplicationDocumentStatus(ctx context.Context, arg UpdateApplicationDocumentStatusParams) (ApplicationDocument, error)
+	UpdateApplicationDocumentTargetURL(ctx context.Context, arg UpdateApplicationDocumentTargetURLParams) (ApplicationDocument, error)
+	UpdateApplicationStatus(ctx context.Context, arg UpdateApplicationStatusParams) (Application, error)
 	UpdateDocumentStatus(ctx context.Context, arg UpdateDocumentStatusParams) (Document, error)
 	UpdateDocumentVersion(ctx context.Context, arg UpdateDocumentVersionParams) (Document, error)
 	UpdateUserLastLogin(ctx context.Context, id uuid.UUID) error
 	UpdateUserRole(ctx context.Context, arg UpdateUserRoleParams) (User, error)
 	UpdateWebhookDeliveryFailed(ctx context.Context, arg UpdateWebhookDeliveryFailedParams) error
 	UpdateWebhookDeliverySuccess(ctx context.Context, id uuid.UUID) error
+	UpdateWebhookStatus(ctx context.Context, arg UpdateWebhookStatusParams) (ApplicationWebhook, error)
 }
 
 var _ Querier = (*Queries)(nil)

@@ -156,6 +156,53 @@ type ApiKey struct {
 	CreatedAt  time.Time    `json:"created_at"`
 }
 
+type Application struct {
+	ID             uuid.UUID      `json:"id"`
+	TenantID       uuid.UUID      `json:"tenant_id"`
+	ExternalID     string         `json:"external_id"`
+	Status         string         `json:"status"`
+	SigningRound   int32          `json:"signing_round"`
+	SignerRole     string         `json:"signer_role"`
+	CallbackUrl    sql.NullString `json:"callback_url"`
+	CallbackSecret sql.NullString `json:"callback_secret"`
+	CancelledAt    sql.NullTime   `json:"cancelled_at"`
+	CancelReason   sql.NullString `json:"cancel_reason"`
+	CreatedAt      time.Time      `json:"created_at"`
+	UpdatedAt      time.Time      `json:"updated_at"`
+}
+
+type ApplicationDocument struct {
+	ID             uuid.UUID      `json:"id"`
+	ApplicationID  uuid.UUID      `json:"application_id"`
+	DocumentID     uuid.NullUUID  `json:"document_id"`
+	DocumentName   string         `json:"document_name"`
+	Version        int32          `json:"version"`
+	SigningRound   int32          `json:"signing_round"`
+	SourceUrl      string         `json:"source_url"`
+	TargetUrl      sql.NullString `json:"target_url"`
+	TargetS3Key    sql.NullString `json:"target_s3_key"`
+	Status         string         `json:"status"`
+	SupersededBy   uuid.NullUUID  `json:"superseded_by"`
+	UploadAttempts int32          `json:"upload_attempts"`
+	LastError      sql.NullString `json:"last_error"`
+	UploadedAt     sql.NullTime   `json:"uploaded_at"`
+	CreatedAt      time.Time      `json:"created_at"`
+}
+
+type ApplicationWebhook struct {
+	ID            uuid.UUID       `json:"id"`
+	ApplicationID uuid.UUID       `json:"application_id"`
+	EventType     string          `json:"event_type"`
+	Payload       json.RawMessage `json:"payload"`
+	HmacSignature sql.NullString  `json:"hmac_signature"`
+	Status        string          `json:"status"`
+	Attempts      int32           `json:"attempts"`
+	NextAttemptAt sql.NullTime    `json:"next_attempt_at"`
+	LastAttemptAt sql.NullTime    `json:"last_attempt_at"`
+	DeliveredAt   sql.NullTime    `json:"delivered_at"`
+	CreatedAt     time.Time       `json:"created_at"`
+}
+
 type AuditLog struct {
 	ID         uuid.UUID             `json:"id"`
 	TenantID   uuid.UUID             `json:"tenant_id"`
