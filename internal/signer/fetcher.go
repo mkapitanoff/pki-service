@@ -31,7 +31,7 @@ func FetchAndCacheDocument(
 		return fmt.Errorf("fetcher: mark fetching doc=%s: %w", doc.ID, err)
 	}
 
-	pdfBytes, contentType, err := extS3.DownloadFromPresignedURL(ctx, doc.SourceUrl)
+	pdfBytes, contentType, err := s3client.DownloadWithRetry(ctx, extS3, doc.SourceUrl, 3)
 	if err != nil {
 		return markFetchFailed(ctx, queries, doc, fmt.Errorf("download: %w", err))
 	}
