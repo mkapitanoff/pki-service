@@ -9,8 +9,8 @@ import (
 
 	"github.com/mkapitanoff/pki-service/internal/repository"
 	"github.com/mkapitanoff/pki-service/internal/s3client"
+	"github.com/mkapitanoff/pki-service/internal/signer"
 	"github.com/mkapitanoff/pki-service/internal/storage"
-	"github.com/mkapitanoff/pki-service/internal/worker"
 )
 
 // uploadSessionDocToClientS3 uploads a signed PDF to the client's pre-signed PUT URL.
@@ -72,21 +72,13 @@ func uploadSessionDocToClientS3(
 	queries.MarkSessionDocumentUploaded(ctx, doc.ID) //nolint:errcheck
 	log.Printf("session_upload: uploaded doc=%s", doc.ID)
 
-	callbackSecret := ""
-	if session.CallbackSecret.Valid {
-		callbackSecret = session.CallbackSecret.String
+	// Re-load the updated doc so signed_at / target_s3_key are populated.
+	updatedDoc, err := queries.GetSigningSessionDocument(ctx, doc.ID)
+	if err != nil {
+		updatedDoc = doc
 	}
-	if session.CallbackUrl.Valid && session.CallbackUrl.String != "" {
-		worker.CreateAndDispatchWebhook(ctx, queries, session.ID, "document_signed", map[string]any{ //nolint:errcheck
-			"application_id": appID,
-			"session_id":     session.ID.String(),
-			"document_id":    doc.ID.String(),
-			"document_name":  doc.DocumentName,
-			"signer_role":    session.SignerRole,
-			"signed_at":      signedAt.Format(time.RFC3339),
-			"s3_key":         doc.TargetS3Key.String,
-		}, callbackSecret)
-	}
+
+	signer.DispatchWebhook(ctx, session, updatedDoc, "document_signed", queries)
 
 	checkSessionCompletion(ctx, queries, session)
 }
@@ -127,21 +119,6 @@ func checkSessionCompletion(ctx context.Context, queries *repository.Queries, se
 		Status: newStatus,
 	})
 
-	if !session.CallbackUrl.Valid || session.CallbackUrl.String == "" {
-		return
-	}
-	callbackSecret := ""
-	if session.CallbackSecret.Valid {
-		callbackSecret = session.CallbackSecret.String
-	}
-	appID := ""
-	if session.ApplicationID.Valid {
-		appID = session.ApplicationID.String
-	}
-	worker.CreateAndDispatchWebhook(ctx, queries, session.ID, eventType, map[string]any{ //nolint:errcheck
-		"application_id": appID,
-		"session_id":     session.ID.String(),
-		"status":         newStatus,
-		"timestamp":      time.Now().UTC().Format(time.RFC3339),
-	}, callbackSecret)
+	// Pass an empty doc — payload builder will query all docs from DB.
+	signer.DispatchWebhook(ctx, session, repository.SigningSessionDocument{}, eventType, queries)
 }
