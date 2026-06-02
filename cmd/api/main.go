@@ -83,6 +83,7 @@ func main() {
 	extS3 := s3client.NewHTTPExternalS3Client()
 	appHandler := handler.NewApplicationHandler(queries, signSvc, extS3, store)
 	signInitiateHandler := handler.NewSignInitiateHandler(queries, extS3, store)
+	signCompleteHandler := handler.NewSignCompleteHandler(queries, ncClient, store, extS3)
 
 	// Workers.
 	workerCtx, cancelWorkers := context.WithCancel(context.Background())
@@ -208,6 +209,7 @@ func main() {
 
 		// Signing session endpoints.
 		api.Post("/sign/initiate", signInitiateHandler.HandleInitiate)
+		api.Post("/sign/complete", signCompleteHandler.HandleComplete)
 
 		// Applications endpoints.
 		api.Post("/applications/{external_id}/submit", appHandler.HandleSubmit)
