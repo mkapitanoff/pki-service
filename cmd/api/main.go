@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
@@ -69,6 +70,16 @@ func main() {
 		log.Fatalf("storage: %v", err)
 	}
 
+	// Ensure signing-related buckets exist (creates them if absent, no-op otherwise).
+	signingCfg := cfg.Signing
+	signingBuckets := []string{signingCfg.CacheBucket, signingCfg.SignedBucket, signingCfg.CMSBucket}
+	if signingCfg.CacheBucket == "" {
+		signingBuckets = []string{"pki-cache", "pki-signed", "pki-cms"}
+	}
+	if err := store.EnsureBuckets(context.Background(), signingBuckets...); err != nil {
+		log.Fatalf("storage: ensure signing buckets: %v", err)
+	}
+
 	authSvc := auth.NewAuthService(queries, cfg.App.JWTSecret)
 	authHandler := handler.NewAuthHandler(authSvc)
 
@@ -106,12 +117,11 @@ func main() {
 		Interval:    webhookInterval,
 		MaxAttempts: appCfg.WebhookMaxAttempts,
 	}, db, queries)
-	cleanupCfg := cfg.Cleanup
-	cleanupInterval := time.Duration(cleanupCfg.CleanupIntervalSec) * time.Second
+	cleanupInterval := time.Duration(signingCfg.CleanupIntervalSec) * time.Second
 	if cleanupInterval <= 0 {
 		cleanupInterval = 10 * time.Minute
 	}
-	cacheTTL := time.Duration(cleanupCfg.CacheTTLSec) * time.Second
+	cacheTTL := time.Duration(signingCfg.CacheTTLSec) * time.Second
 	if cacheTTL <= 0 {
 		cacheTTL = 24 * time.Hour
 	}
@@ -148,28 +158,43 @@ func main() {
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.RequestID)
 
-	r.Get("/health", func(w http.ResponseWriter, _ *http.Request) {
+	r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		fetcherStatus := "running"
-		select {
-		case <-docFetcher.Running():
-			fetcherStatus = "stopped"
-		default:
+
+		workerStatus := func(ch <-chan struct{}) string {
+			select {
+			case <-ch:
+				return "stopped"
+			default:
+				return "running"
+			}
 		}
-		dispatcherStatus := "running"
-		select {
-		case <-webhookDispatcher.Running():
-			dispatcherStatus = "stopped"
-		default:
+
+		// Bucket ping with short timeout — non-fatal if slow.
+		pingCtx, pingCancel := context.WithTimeout(r.Context(), 2*time.Second)
+		defer pingCancel()
+		bucketStatus := make(map[string]string, len(signingBuckets))
+		for _, b := range signingBuckets {
+			if err := store.PingBucket(pingCtx, b); err != nil {
+				bucketStatus[b] = "unavailable"
+			} else {
+				bucketStatus[b] = "ok"
+			}
 		}
-		cleanupStatus := "running"
-		select {
-		case <-sessionCleanup.Running():
-			cleanupStatus = "stopped"
-		default:
+
+		resp := map[string]any{
+			"status": "ok",
+			"env":    cfg.App.Env,
+			"workers": map[string]string{
+				"document_fetcher":   workerStatus(docFetcher.Running()),
+				"webhook_dispatcher": workerStatus(webhookDispatcher.Running()),
+				"session_cleanup":    workerStatus(sessionCleanup.Running()),
+			},
+			"storage": bucketStatus,
 		}
-		fmt.Fprintf(w, `{"status":"ok","env":"%s","workers":{"document_fetcher":"%s","webhook_dispatcher":"%s","session_cleanup":"%s"}}`,
-			cfg.App.Env, fetcherStatus, dispatcherStatus, cleanupStatus)
+		if err := json.NewEncoder(w).Encode(resp); err != nil {
+			log.Printf("health: encode response: %v", err)
+		}
 	})
 
 	r.Group(func(pub chi.Router) {

@@ -66,9 +66,19 @@ type ApplicationsConfig struct {
 	WebhookMaxAttempts int `mapstructure:"webhook_max_attempts"`
 }
 
-type CleanupConfig struct {
-	CleanupIntervalSec int `mapstructure:"cleanup_interval_sec"`
-	CacheTTLSec        int `mapstructure:"cache_ttl_sec"`
+type SigningConfig struct {
+	SessionTTLSec             int    `mapstructure:"session_ttl_sec"`
+	FetchTimeoutSec           int    `mapstructure:"fetch_timeout_sec"`
+	UploadMaxAttempts         int    `mapstructure:"upload_max_attempts"`
+	UploadBackoffInitialSec   int    `mapstructure:"upload_backoff_initial_sec"`
+	UploadBackoffMultiplier   int    `mapstructure:"upload_backoff_multiplier"`
+	WebhookTimeoutSec         int    `mapstructure:"webhook_timeout_sec"`
+	WebhookMaxAttempts        int    `mapstructure:"webhook_max_attempts"`
+	CleanupIntervalSec        int    `mapstructure:"cleanup_interval_sec"`
+	CacheTTLSec               int    `mapstructure:"cache_ttl_sec"`
+	CacheBucket               string `mapstructure:"cache_bucket"`
+	SignedBucket              string `mapstructure:"signed_bucket"`
+	CMSBucket                 string `mapstructure:"cms_bucket"`
 }
 
 type Config struct {
@@ -81,7 +91,7 @@ type Config struct {
 	Log          LogConfig          `mapstructure:"log"`
 	RateLimit    RateLimitConfig    `mapstructure:"rate_limit"`
 	Applications ApplicationsConfig `mapstructure:"applications"`
-	Cleanup      CleanupConfig      `mapstructure:"cleanup"`
+	Signing      SigningConfig      `mapstructure:"signing"`
 }
 
 // Load reads configs/config.{env}.yaml. ENV variables override yaml values

@@ -48,6 +48,16 @@ applications:
   webhook_interval_sec: 5
   webhook_max_attempts: 5
 
-cleanup:
-  cleanup_interval_sec: 600    # 10 minutes
-  cache_ttl_sec: 86400         # 24 hours
+signing:
+  session_ttl_sec: 7200              # 2h
+  fetch_timeout_sec: 55
+  upload_max_attempts: 3
+  upload_backoff_initial_sec: 1
+  upload_backoff_multiplier: 3
+  webhook_timeout_sec: 10
+  webhook_max_attempts: 3
+  cleanup_interval_sec: 600          # 10m
+  cache_ttl_sec: 86400               # 24h
+  cache_bucket: "pki-cache"
+  signed_bucket: "pki-signed"
+  cms_bucket: "pki-cms"

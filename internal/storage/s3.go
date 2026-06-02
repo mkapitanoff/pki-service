@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -122,6 +123,39 @@ func (s *S3Client) DownloadFile(ctx context.Context, key string) ([]byte, error)
 		return nil, fmt.Errorf("storage: read body %q: %w", key, err)
 	}
 	return data, nil
+}
+
+// EnsureBuckets creates each bucket if it does not already exist.
+// Safe to call on every startup — ignores BucketAlreadyOwnedByYou / BucketAlreadyExists.
+func (s *S3Client) EnsureBuckets(ctx context.Context, buckets ...string) error {
+	for _, bucket := range buckets {
+		_, err := s.client.CreateBucket(ctx, &s3.CreateBucketInput{
+			Bucket: aws.String(bucket),
+		})
+		if err != nil {
+			var apiErr smithy.APIError
+			if errors.As(err, &apiErr) {
+				code := apiErr.ErrorCode()
+				if code == "BucketAlreadyOwnedByYou" || code == "BucketAlreadyExists" {
+					continue
+				}
+			}
+			return fmt.Errorf("storage: create bucket %q: %w", bucket, err)
+		}
+		log.Printf("storage: created bucket %q", bucket)
+	}
+	return nil
+}
+
+// PingBucket returns nil if the bucket exists and is accessible, an error otherwise.
+func (s *S3Client) PingBucket(ctx context.Context, bucket string) error {
+	_, err := s.client.HeadBucket(ctx, &s3.HeadBucketInput{
+		Bucket: aws.String(bucket),
+	})
+	if err != nil {
+		return fmt.Errorf("storage: ping bucket %q: %w", bucket, err)
+	}
+	return nil
 }
 
 func (s *S3Client) DeleteFile(ctx context.Context, key string) error {
