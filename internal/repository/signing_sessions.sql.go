@@ -433,6 +433,42 @@ func (q *Queries) MarkSessionDocumentUploaded(ctx context.Context, id uuid.UUID)
 	return i, err
 }
 
+const resetSessionDocumentForRetry = `-- name: ResetSessionDocumentForRetry :one
+UPDATE signing_session_documents
+SET status = 'signed', upload_attempts = 0, last_error = NULL, target_url = $2
+WHERE id = $1
+RETURNING id, session_id, document_name, source_url, target_url, target_s3_key, content_hash, cached_s3_key, signed_s3_key, cms_s3_key, status, last_error, upload_attempts, signed_at, uploaded_at, created_at
+`
+
+type ResetSessionDocumentForRetryParams struct {
+	ID        uuid.UUID      `json:"id"`
+	TargetUrl sql.NullString `json:"target_url"`
+}
+
+func (q *Queries) ResetSessionDocumentForRetry(ctx context.Context, arg ResetSessionDocumentForRetryParams) (SigningSessionDocument, error) {
+	row := q.db.QueryRowContext(ctx, resetSessionDocumentForRetry, arg.ID, arg.TargetUrl)
+	var i SigningSessionDocument
+	err := row.Scan(
+		&i.ID,
+		&i.SessionID,
+		&i.DocumentName,
+		&i.SourceUrl,
+		&i.TargetUrl,
+		&i.TargetS3Key,
+		&i.ContentHash,
+		&i.CachedS3Key,
+		&i.SignedS3Key,
+		&i.CmsS3Key,
+		&i.Status,
+		&i.LastError,
+		&i.UploadAttempts,
+		&i.SignedAt,
+		&i.UploadedAt,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const updateSessionDocumentAfterFetch = `-- name: UpdateSessionDocumentAfterFetch :one
 UPDATE signing_session_documents
 SET content_hash = $2, cached_s3_key = $3, status = 'ready'

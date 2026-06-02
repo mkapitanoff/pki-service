@@ -84,6 +84,7 @@ func main() {
 	appHandler := handler.NewApplicationHandler(queries, signSvc, extS3, store)
 	signInitiateHandler := handler.NewSignInitiateHandler(queries, extS3, store)
 	signCompleteHandler := handler.NewSignCompleteHandler(queries, ncClient, store, extS3)
+	signStatusHandler := handler.NewSignStatusHandler(queries, extS3, store)
 
 	// Workers.
 	workerCtx, cancelWorkers := context.WithCancel(context.Background())
@@ -210,6 +211,8 @@ func main() {
 		// Signing session endpoints.
 		api.Post("/sign/initiate", signInitiateHandler.HandleInitiate)
 		api.Post("/sign/complete", signCompleteHandler.HandleComplete)
+		api.Get("/sign/status/{session_id}", signStatusHandler.HandleGetStatus)
+		api.Patch("/sign/refresh-urls", signStatusHandler.HandleRefreshURLs)
 
 		// Applications endpoints.
 		api.Post("/applications/{external_id}/submit", appHandler.HandleSubmit)

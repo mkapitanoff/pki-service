@@ -69,6 +69,7 @@ type Querier interface {
 	ListUsers(ctx context.Context) ([]User, error)
 	MarkApplicationDocumentUploaded(ctx context.Context, id uuid.UUID) (ApplicationDocument, error)
 	MarkSessionDocumentUploaded(ctx context.Context, id uuid.UUID) (SigningSessionDocument, error)
+	ResetSessionDocumentForRetry(ctx context.Context, arg ResetSessionDocumentForRetryParams) (SigningSessionDocument, error)
 	SupersedeApplicationDocument(ctx context.Context, arg SupersedeApplicationDocumentParams) (ApplicationDocument, error)
 	UpdateAPIKeyLastUsed(ctx context.Context, id uuid.UUID) error
 	UpdateApplicationDocumentAfterFetch(ctx context.Context, arg UpdateApplicationDocumentAfterFetchParams) (ApplicationDocument, error)

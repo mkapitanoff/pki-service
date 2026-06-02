@@ -23,7 +23,6 @@ import (
 	"github.com/mkapitanoff/pki-service/internal/s3client"
 	"github.com/mkapitanoff/pki-service/internal/signer"
 	"github.com/mkapitanoff/pki-service/internal/storage"
-	"github.com/mkapitanoff/pki-service/internal/worker"
 )
 
 // SignCompleteHandler handles POST /api/v1/sign/complete.
@@ -334,134 +333,14 @@ func (h *SignCompleteHandler) buildSignedPDF(
 	return finalPDF, nil
 }
 
-// uploadToClientS3 uploads the signed PDF to the client's pre-signed target URL.
+// uploadToClientS3 delegates to the shared package-level helper.
 func (h *SignCompleteHandler) uploadToClientS3(
 	ctx context.Context,
 	session repository.SigningSession,
 	doc repository.SigningSessionDocument,
 	signedPDF []byte,
 ) {
-	if h.extS3 == nil || !doc.TargetUrl.Valid || doc.TargetUrl.String == "" {
-		return
-	}
-
-	appID := ""
-	if session.ApplicationID.Valid {
-		appID = session.ApplicationID.String
-	}
-
-	signedAt := time.Now().UTC()
-	if doc.SignedAt.Valid {
-		signedAt = doc.SignedAt.Time
-	}
-
-	cmsKey := ""
-	if doc.CmsS3Key.Valid {
-		cmsKey = doc.CmsS3Key.String
-	}
-
-	meta := s3client.S3Metadata{
-		ApplicationID:   appID,
-		DocumentID:      doc.ID.String(),
-		DocumentName:    doc.DocumentName,
-		SignerRole:      session.SignerRole,
-		SignedAt:        signedAt,
-		SigningRound:    1,
-		DocumentVersion: 1,
-		CMSStorageKey:   cmsKey,
-	}
-
-	err := s3client.UploadWithRetry(ctx, h.extS3, doc.TargetUrl.String, signedPDF, "application/pdf", meta, 3)
-	if err != nil {
-		errMsg := err.Error()
-		if errors.Is(err, s3client.ErrPresignedURLExpired) {
-			errMsg = "presigned_url_expired"
-		}
-		log.Printf("sign_complete: upload to client S3 doc=%s: %v", doc.ID, err)
-		h.queries.UpdateSessionDocumentStatus(ctx, repository.UpdateSessionDocumentStatusParams{ //nolint:errcheck
-			ID:        doc.ID,
-			Status:    "upload_failed",
-			LastError: sql.NullString{String: errMsg, Valid: true},
-		})
-		h.checkSessionCompletion(ctx, session)
-		return
-	}
-
-	h.queries.MarkSessionDocumentUploaded(ctx, doc.ID) //nolint:errcheck
-	log.Printf("sign_complete: uploaded to client S3 doc=%s", doc.ID)
-
-	callbackSecret := ""
-	if session.CallbackSecret.Valid {
-		callbackSecret = session.CallbackSecret.String
-	}
-	if session.CallbackUrl.Valid && session.CallbackUrl.String != "" {
-		worker.CreateAndDispatchWebhook(ctx, h.queries, session.ID, "document_signed", map[string]any{ //nolint:errcheck
-			"application_id": appID,
-			"session_id":     session.ID.String(),
-			"document_id":    doc.ID.String(),
-			"document_name":  doc.DocumentName,
-			"signer_role":    session.SignerRole,
-			"signed_at":      signedAt.Format(time.RFC3339),
-			"s3_key":         doc.TargetS3Key.String,
-		}, callbackSecret)
-	}
-
-	h.checkSessionCompletion(ctx, session)
-}
-
-// checkSessionCompletion checks whether all documents in the session are
-// uploaded/upload_failed and if so marks the session completed or failed.
-func (h *SignCompleteHandler) checkSessionCompletion(ctx context.Context, session repository.SigningSession) {
-	docs, err := h.queries.ListSessionDocuments(ctx, session.ID)
-	if err != nil {
-		return
-	}
-
-	allDone := true
-	anyFailed := false
-	for _, d := range docs {
-		switch d.Status {
-		case "uploaded", "upload_failed":
-			if d.Status == "upload_failed" {
-				anyFailed = true
-			}
-		default:
-			allDone = false
-		}
-	}
-	if !allDone {
-		return
-	}
-
-	newStatus := "completed"
-	eventType := "session_completed"
-	if anyFailed {
-		newStatus = "failed"
-		eventType = "session_failed"
-	}
-
-	h.queries.UpdateSigningSessionStatus(ctx, repository.UpdateSigningSessionStatusParams{ //nolint:errcheck
-		ID:     session.ID,
-		Status: newStatus,
-	})
-
-	callbackSecret := ""
-	if session.CallbackSecret.Valid {
-		callbackSecret = session.CallbackSecret.String
-	}
-	appID := ""
-	if session.ApplicationID.Valid {
-		appID = session.ApplicationID.String
-	}
-
-	if session.CallbackUrl.Valid && session.CallbackUrl.String != "" {
-		worker.CreateAndDispatchWebhook(ctx, h.queries, session.ID, eventType, map[string]any{ //nolint:errcheck
-			"application_id": appID,
-			"session_id":     session.ID.String(),
-			"status":         newStatus,
-			"timestamp":      time.Now().UTC().Format(time.RFC3339),
-		}, callbackSecret)
-	}
+	uploadSessionDocToClientS3(ctx, h.queries, h.extS3, h.store, session, doc, signedPDF)
 }
 
 // --- sentinel error types for typed HTTP responses ---

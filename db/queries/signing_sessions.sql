@@ -78,6 +78,12 @@ SET upload_attempts = upload_attempts + 1, last_error = $2
 WHERE id = $1
 RETURNING *;
 
+-- name: ResetSessionDocumentForRetry :one
+UPDATE signing_session_documents
+SET status = 'signed', upload_attempts = 0, last_error = NULL, target_url = $2
+WHERE id = $1
+RETURNING *;
+
 -- name: GetExpiredSessions :many
 SELECT * FROM signing_sessions
 WHERE expires_at < now()
