@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
@@ -19,10 +20,19 @@ import (
 // ErrNotFound is returned when a requested object does not exist.
 var ErrNotFound = errors.New("storage: object not found")
 
+// ObjectInfo describes a single object returned by ListObjectKeys.
+type ObjectInfo struct {
+	Key          string
+	Size         int64
+	LastModified time.Time
+}
+
 // Storage abstracts object storage (S3 / MinIO).
 type Storage interface {
 	UploadFile(ctx context.Context, key string, data []byte, contentType string) error
 	DownloadFile(ctx context.Context, key string) ([]byte, error)
+	DeleteFile(ctx context.Context, key string) error
+	ListObjectKeys(ctx context.Context, prefix string) ([]ObjectInfo, error)
 	BuildKey(tenantID, documentID uuid.UUID, filename string) string
 }
 
@@ -112,6 +122,41 @@ func (s *S3Client) DownloadFile(ctx context.Context, key string) ([]byte, error)
 		return nil, fmt.Errorf("storage: read body %q: %w", key, err)
 	}
 	return data, nil
+}
+
+func (s *S3Client) DeleteFile(ctx context.Context, key string) error {
+	if _, err := s.client.DeleteObject(ctx, &s3.DeleteObjectInput{
+		Bucket: aws.String(s.bucket),
+		Key:    aws.String(key),
+	}); err != nil {
+		return fmt.Errorf("storage: delete %q: %w", key, err)
+	}
+	return nil
+}
+
+func (s *S3Client) ListObjectKeys(ctx context.Context, prefix string) ([]ObjectInfo, error) {
+	var results []ObjectInfo
+	paginator := s3.NewListObjectsV2Paginator(s.client, &s3.ListObjectsV2Input{
+		Bucket: aws.String(s.bucket),
+		Prefix: aws.String(prefix),
+	})
+	for paginator.HasMorePages() {
+		page, err := paginator.NextPage(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("storage: list %q: %w", prefix, err)
+		}
+		for _, obj := range page.Contents {
+			info := ObjectInfo{Key: aws.ToString(obj.Key)}
+			if obj.Size != nil {
+				info.Size = *obj.Size
+			}
+			if obj.LastModified != nil {
+				info.LastModified = *obj.LastModified
+			}
+			results = append(results, info)
+		}
+	}
+	return results, nil
 }
 
 func isNoSuchKey(err error) bool {

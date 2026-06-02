@@ -106,8 +106,22 @@ func main() {
 		Interval:    webhookInterval,
 		MaxAttempts: appCfg.WebhookMaxAttempts,
 	}, db, queries)
+	cleanupCfg := cfg.Cleanup
+	cleanupInterval := time.Duration(cleanupCfg.CleanupIntervalSec) * time.Second
+	if cleanupInterval <= 0 {
+		cleanupInterval = 10 * time.Minute
+	}
+	cacheTTL := time.Duration(cleanupCfg.CacheTTLSec) * time.Second
+	if cacheTTL <= 0 {
+		cacheTTL = 24 * time.Hour
+	}
+	sessionCleanup := worker.NewSessionCleanupWorker(worker.SessionCleanupConfig{
+		CleanupInterval: cleanupInterval,
+		CacheTTL:        cacheTTL,
+	}, queries, store)
 	go docFetcher.Run(workerCtx)
 	go webhookDispatcher.Run(workerCtx)
+	go sessionCleanup.Run(workerCtx)
 	_ = cancelWorkers // called on shutdown below
 
 	r := chi.NewRouter()
@@ -148,8 +162,14 @@ func main() {
 			dispatcherStatus = "stopped"
 		default:
 		}
-		fmt.Fprintf(w, `{"status":"ok","env":"%s","workers":{"document_fetcher":"%s","webhook_dispatcher":"%s"}}`,
-			cfg.App.Env, fetcherStatus, dispatcherStatus)
+		cleanupStatus := "running"
+		select {
+		case <-sessionCleanup.Running():
+			cleanupStatus = "stopped"
+		default:
+		}
+		fmt.Fprintf(w, `{"status":"ok","env":"%s","workers":{"document_fetcher":"%s","webhook_dispatcher":"%s","session_cleanup":"%s"}}`,
+			cfg.App.Env, fetcherStatus, dispatcherStatus, cleanupStatus)
 	})
 
 	r.Group(func(pub chi.Router) {

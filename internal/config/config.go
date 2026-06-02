@@ -66,6 +66,11 @@ type ApplicationsConfig struct {
 	WebhookMaxAttempts int `mapstructure:"webhook_max_attempts"`
 }
 
+type CleanupConfig struct {
+	CleanupIntervalSec int `mapstructure:"cleanup_interval_sec"`
+	CacheTTLSec        int `mapstructure:"cache_ttl_sec"`
+}
+
 type Config struct {
 	App          AppConfig          `mapstructure:"app"`
 	Database     DatabaseConfig     `mapstructure:"database"`
@@ -76,6 +81,7 @@ type Config struct {
 	Log          LogConfig          `mapstructure:"log"`
 	RateLimit    RateLimitConfig    `mapstructure:"rate_limit"`
 	Applications ApplicationsConfig `mapstructure:"applications"`
+	Cleanup      CleanupConfig      `mapstructure:"cleanup"`
 }
 
 // Load reads configs/config.{env}.yaml. ENV variables override yaml values

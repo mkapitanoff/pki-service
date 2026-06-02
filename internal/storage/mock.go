@@ -3,7 +3,9 @@ package storage
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
+	"time"
 
 	"github.com/google/uuid"
 )
@@ -43,4 +45,27 @@ func (m *MockStorage) DownloadFile(ctx context.Context, key string) ([]byte, err
 	cp := make([]byte, len(data))
 	copy(cp, data)
 	return cp, nil
+}
+
+func (m *MockStorage) DeleteFile(ctx context.Context, key string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	delete(m.files, key)
+	return nil
+}
+
+func (m *MockStorage) ListObjectKeys(ctx context.Context, prefix string) ([]ObjectInfo, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	var results []ObjectInfo
+	for k, v := range m.files {
+		if strings.HasPrefix(k, prefix) {
+			results = append(results, ObjectInfo{
+				Key:          k,
+				Size:         int64(len(v)),
+				LastModified: time.Now(),
+			})
+		}
+	}
+	return results, nil
 }
