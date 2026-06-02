@@ -348,21 +348,23 @@ func (s *SignService) Sign(ctx context.Context, input SignInput) (*SignResult, e
 	fmt.Printf("[sign] step 18 OK: committed, sigID=%s\n", createdSig.ID)
 	committed = true
 
-	// 19. Publish event (best-effort).
+	// 19. Publish event (best-effort) + fan-out to tenant webhooks.
 	downloadURL := fmt.Sprintf("%s/api/v1/documents/%s/file", s.verifyBaseURL, input.DocumentID)
-	if s.publisher != nil {
-		_ = s.publisher.Publish(ctx, "signature.added", map[string]any{
-			"event":             "document.signed",
-			"document_id":       input.DocumentID,
-			"signature_id":      createdSig.ID,
-			"signer_name":       createdSig.SignerName,
-			"signed_at":         createdSig.SignedAt,
-			"tenant_id":         input.TenantID,
-			"download_url":      downloadURL,
-			"signatures_count":  int(sequenceNum),
-			"document_status":   string(newStatus),
-		})
+	eventPayload := map[string]any{
+		"event":            "document.signed",
+		"document_id":      input.DocumentID,
+		"signature_id":     createdSig.ID,
+		"signer_name":      createdSig.SignerName,
+		"signed_at":        createdSig.SignedAt,
+		"tenant_id":        input.TenantID,
+		"download_url":     downloadURL,
+		"signatures_count": int(sequenceNum),
+		"document_status":  string(newStatus),
 	}
+	if s.publisher != nil {
+		_ = s.publisher.Publish(ctx, "signature.added", eventPayload)
+	}
+	go FanOutWebhook(context.Background(), s.queries, input.TenantID, "signature.added", eventPayload)
 
 	// 20. Build redirect_url from callback_url if present.
 	redirectURL := ""

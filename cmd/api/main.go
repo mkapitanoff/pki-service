@@ -90,6 +90,7 @@ func main() {
 	documentHandler := handler.NewDocumentHandler(queries, store, cfg.App.VerifyBaseURL, ncClient)
 	batchHandler := handler.NewBatchHandler(signSvc, queries, store, cfg.App.VerifyBaseURL, ncClient)
 	adminHandler := handler.NewAdminHandler(queries, authSvc)
+	webhookHandler := handler.NewWebhookHandler(queries)
 
 	extS3 := s3client.NewHTTPExternalS3Client()
 	appHandler := handler.NewApplicationHandler(queries, signSvc, extS3, store)
@@ -129,9 +130,14 @@ func main() {
 		CleanupInterval: cleanupInterval,
 		CacheTTL:        cacheTTL,
 	}, queries, store)
+	deliveryPoller := worker.NewWebhookDeliveryPoller(worker.WebhookDeliveryPollerConfig{
+		Interval:  5 * time.Second,
+		BatchSize: 50,
+	}, queries, &http.Client{Timeout: 15 * time.Second})
 	go docFetcher.Run(workerCtx)
 	go webhookDispatcher.Run(workerCtx)
 	go sessionCleanup.Run(workerCtx)
+	go deliveryPoller.Run(workerCtx)
 	_ = cancelWorkers // called on shutdown below
 
 	r := chi.NewRouter()
@@ -186,9 +192,10 @@ func main() {
 			"status": "ok",
 			"env":    cfg.App.Env,
 			"workers": map[string]string{
-				"document_fetcher":   workerStatus(docFetcher.Running()),
-				"webhook_dispatcher": workerStatus(webhookDispatcher.Running()),
-				"session_cleanup":    workerStatus(sessionCleanup.Running()),
+				"document_fetcher":        workerStatus(docFetcher.Running()),
+				"webhook_dispatcher":      workerStatus(webhookDispatcher.Running()),
+				"session_cleanup":         workerStatus(sessionCleanup.Running()),
+				"webhook_delivery_poller": workerStatus(deliveryPoller.Running()),
 			},
 			"storage": bucketStatus,
 		}
@@ -258,6 +265,12 @@ func main() {
 		api.Post("/sign/complete", signCompleteHandler.HandleComplete)
 		api.Get("/sign/status/{session_id}", signStatusHandler.HandleGetStatus)
 		api.Patch("/sign/refresh-urls", signStatusHandler.HandleRefreshURLs)
+
+		// Webhook subscription management.
+		api.Get("/webhooks", webhookHandler.HandleList)
+		api.Post("/webhooks", webhookHandler.HandleCreate)
+		api.Delete("/webhooks/{webhook_id}", webhookHandler.HandleDelete)
+		api.Post("/webhooks/{webhook_id}/test", webhookHandler.HandleTest)
 
 		// Applications endpoints.
 		api.Post("/applications/{external_id}/submit", appHandler.HandleSubmit)

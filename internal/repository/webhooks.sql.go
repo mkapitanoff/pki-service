@@ -15,6 +15,39 @@ import (
 	"github.com/lib/pq"
 )
 
+const createWebhook = `-- name: CreateWebhook :one
+INSERT INTO webhooks (tenant_id, url, events, secret)
+VALUES ($1, $2, $3, $4)
+RETURNING id, tenant_id, url, events, secret, is_active, created_at
+`
+
+type CreateWebhookParams struct {
+	TenantID uuid.UUID `json:"tenant_id"`
+	Url      string    `json:"url"`
+	Events   []string  `json:"events"`
+	Secret   string    `json:"secret"`
+}
+
+func (q *Queries) CreateWebhook(ctx context.Context, arg CreateWebhookParams) (Webhook, error) {
+	row := q.db.QueryRowContext(ctx, createWebhook,
+		arg.TenantID,
+		arg.Url,
+		pq.Array(arg.Events),
+		arg.Secret,
+	)
+	var i Webhook
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.Url,
+		pq.Array(&i.Events),
+		&i.Secret,
+		&i.IsActive,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const createWebhookDelivery = `-- name: CreateWebhookDelivery :one
 INSERT INTO webhook_deliveries (webhook_id, event, payload, attempt, status, scheduled_at)
 VALUES ($1, $2, $3, $4, $5, $6)
@@ -53,6 +86,21 @@ func (q *Queries) CreateWebhookDelivery(ctx context.Context, arg CreateWebhookDe
 		&i.DeliveredAt,
 	)
 	return i, err
+}
+
+const deactivateWebhook = `-- name: DeactivateWebhook :exec
+UPDATE webhooks SET is_active = false
+WHERE id = $1 AND tenant_id = $2
+`
+
+type DeactivateWebhookParams struct {
+	ID       uuid.UUID `json:"id"`
+	TenantID uuid.UUID `json:"tenant_id"`
+}
+
+func (q *Queries) DeactivateWebhook(ctx context.Context, arg DeactivateWebhookParams) error {
+	_, err := q.db.ExecContext(ctx, deactivateWebhook, arg.ID, arg.TenantID)
+	return err
 }
 
 const getWebhookByID = `-- name: GetWebhookByID :one
@@ -112,6 +160,85 @@ type GetWebhooksByTenantAndEventParams struct {
 
 func (q *Queries) GetWebhooksByTenantAndEvent(ctx context.Context, arg GetWebhooksByTenantAndEventParams) ([]Webhook, error) {
 	rows, err := q.db.QueryContext(ctx, getWebhooksByTenantAndEvent, arg.TenantID, arg.Column2)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Webhook
+	for rows.Next() {
+		var i Webhook
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.Url,
+			pq.Array(&i.Events),
+			&i.Secret,
+			&i.IsActive,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listPendingWebhookDeliveries = `-- name: ListPendingWebhookDeliveries :many
+SELECT id, webhook_id, event, payload, attempt, status, response_code, error_msg, scheduled_at, delivered_at FROM webhook_deliveries
+WHERE status = 'pending'
+  AND scheduled_at <= now()
+ORDER BY scheduled_at
+LIMIT $1
+`
+
+func (q *Queries) ListPendingWebhookDeliveries(ctx context.Context, limit int32) ([]WebhookDelivery, error) {
+	rows, err := q.db.QueryContext(ctx, listPendingWebhookDeliveries, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []WebhookDelivery
+	for rows.Next() {
+		var i WebhookDelivery
+		if err := rows.Scan(
+			&i.ID,
+			&i.WebhookID,
+			&i.Event,
+			&i.Payload,
+			&i.Attempt,
+			&i.Status,
+			&i.ResponseCode,
+			&i.ErrorMsg,
+			&i.ScheduledAt,
+			&i.DeliveredAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listWebhooksByTenant = `-- name: ListWebhooksByTenant :many
+SELECT id, tenant_id, url, events, secret, is_active, created_at FROM webhooks
+WHERE tenant_id = $1
+ORDER BY created_at DESC
+`
+
+func (q *Queries) ListWebhooksByTenant(ctx context.Context, tenantID uuid.UUID) ([]Webhook, error) {
+	rows, err := q.db.QueryContext(ctx, listWebhooksByTenant, tenantID)
 	if err != nil {
 		return nil, err
 	}

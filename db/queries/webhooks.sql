@@ -1,3 +1,24 @@
+-- name: CreateWebhook :one
+INSERT INTO webhooks (tenant_id, url, events, secret)
+VALUES ($1, $2, $3, $4)
+RETURNING *;
+
+-- name: ListWebhooksByTenant :many
+SELECT * FROM webhooks
+WHERE tenant_id = $1
+ORDER BY created_at DESC;
+
+-- name: DeactivateWebhook :exec
+UPDATE webhooks SET is_active = false
+WHERE id = $1 AND tenant_id = $2;
+
+-- name: ListPendingWebhookDeliveries :many
+SELECT * FROM webhook_deliveries
+WHERE status = 'pending'
+  AND scheduled_at <= now()
+ORDER BY scheduled_at
+LIMIT $1;
+
 -- name: GetWebhooksByTenantAndEvent :many
 SELECT * FROM webhooks
 WHERE tenant_id = $1

@@ -1,7 +1,7 @@
 app:
   env: prod
   port: 8080
-  verify_base_url: "http://localhost:8080"
+  verify_base_url: "https://pki-service.darch.pro"
   jwt_secret: "CHANGE_ME_USE_STRONG_SECRET_32CHARS"
   cors_origins: "*"
 
