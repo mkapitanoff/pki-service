@@ -180,10 +180,31 @@ func normalizeCMS(cms string) string {
 
 // VerifyCMS posts the CMS + document hash to {url}/cms/verify and normalizes
 // the response. Returns ErrCMSInvalid / ErrCertRevoked for business failures.
+//
+// Supports both detached and attached (encapsulated) CMS:
+//   - Detached: docSHA256 is the hash of the signed document (NCALayer encapsulate:false).
+//   - Attached: the PDF is embedded inside the CMS blob (NCALayer encapsulate:true).
+//     NCANode detects this automatically when data="" and verifies the embedded content.
+//
+// Strategy: try with docSHA256 first; if NCANode rejects with "content hash found in
+// signed attributes different", the CMS is attached — retry with empty data.
 func (c *HTTPClient) VerifyCMS(ctx context.Context, cmsBase64 string, docSHA256 string) (*VerifyResult, error) {
+	normalized := normalizeCMS(cmsBase64)
+
 	var resp cmsVerifyResponse
-	if err := c.postJSON(ctx, "/cms/verify", cmsVerifyRequest{CMS: normalizeCMS(cmsBase64), Data: docSHA256}, &resp); err != nil {
-		return nil, err
+	err := c.postJSON(ctx, "/cms/verify", cmsVerifyRequest{CMS: normalized, Data: docSHA256}, &resp)
+	if err != nil {
+		// Attached CMS: the signed attributes contain the hash of the embedded content,
+		// not of our stored document. Retry with empty data so NCANode verifies internally.
+		if strings.Contains(err.Error(), "content hash found in signed attributes different") {
+			var resp2 cmsVerifyResponse
+			if err2 := c.postJSON(ctx, "/cms/verify", cmsVerifyRequest{CMS: normalized, Data: ""}, &resp2); err2 != nil {
+				return nil, err2
+			}
+			resp = resp2
+		} else {
+			return nil, err
+		}
 	}
 
 	if !resp.Valid || len(resp.Signers) == 0 {

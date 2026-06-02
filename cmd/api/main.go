@@ -81,7 +81,7 @@ func main() {
 	adminHandler := handler.NewAdminHandler(queries, authSvc)
 
 	extS3 := s3client.NewHTTPExternalS3Client()
-	appHandler := handler.NewApplicationHandler(queries, signSvc, extS3)
+	appHandler := handler.NewApplicationHandler(queries, signSvc, extS3, store)
 
 	// Workers.
 	workerCtx, cancelWorkers := context.WithCancel(context.Background())

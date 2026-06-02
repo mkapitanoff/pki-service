@@ -17,6 +17,7 @@ import (
 	"github.com/mkapitanoff/pki-service/internal/repository"
 	"github.com/mkapitanoff/pki-service/internal/s3client"
 	"github.com/mkapitanoff/pki-service/internal/service"
+	"github.com/mkapitanoff/pki-service/internal/storage"
 	"github.com/mkapitanoff/pki-service/internal/worker"
 )
 
@@ -25,6 +26,7 @@ type ApplicationHandler struct {
 	queries  *repository.Queries
 	signSvc  *service.SignService
 	extS3    s3client.ExternalS3Client
+	store    storage.Storage
 }
 
 // NewApplicationHandler creates a new ApplicationHandler.
@@ -32,11 +34,13 @@ func NewApplicationHandler(
 	queries *repository.Queries,
 	signSvc *service.SignService,
 	extS3 s3client.ExternalS3Client,
+	store storage.Storage,
 ) *ApplicationHandler {
 	return &ApplicationHandler{
 		queries: queries,
 		signSvc: signSvc,
 		extS3:   extS3,
+		store:   store,
 	}
 }
 
@@ -326,8 +330,17 @@ func (h *ApplicationHandler) uploadSignedDocument(ctx context.Context, app repos
 		return
 	}
 
-	// Download signed PDF from our storage (via URL in signResult).
-	_ = signResult // signResult.SignedDocumentURL — we need the actual bytes
+	// Download signed PDF from our MinIO.
+	pdfBytes, err := h.store.DownloadFile(ctx, signResult.S3KeySigned)
+	if err != nil {
+		log.Printf("applications: download signed pdf s3_key=%s doc=%s: %v", signResult.S3KeySigned, appDoc.ID, err)
+		h.queries.UpdateApplicationDocumentStatus(ctx, repository.UpdateApplicationDocumentStatusParams{ //nolint:errcheck
+			ID:        appDoc.ID,
+			Status:    "upload_failed",
+			LastError: sql.NullString{String: fmt.Sprintf("download from minIO: %v", err), Valid: true},
+		})
+		return
+	}
 
 	// Use the document s3 key for metadata.
 	meta := s3client.S3Metadata{
@@ -338,9 +351,10 @@ func (h *ApplicationHandler) uploadSignedDocument(ctx context.Context, app repos
 		SignedAt:        time.Now().UTC(),
 		SigningRound:    int(app.SigningRound),
 		DocumentVersion: int(appDoc.Version),
+		CMSStorageKey:   signResult.S3KeySigned,
 	}
 
-	err := s3client.UploadWithRetry(ctx, h.extS3, appDoc.TargetUrl.String, []byte{}, "application/pdf", meta, 3)
+	err = s3client.UploadWithRetry(ctx, h.extS3, appDoc.TargetUrl.String, pdfBytes, "application/pdf", meta, 3)
 	if err != nil {
 		log.Printf("applications: upload doc=%s: %v", appDoc.ID, err)
 

@@ -63,6 +63,7 @@ type SignInput struct {
 type SignResult struct {
 	SignatureID       uuid.UUID
 	SignedDocumentURL string
+	S3KeySigned       string // S3 key of the signed PDF in our MinIO
 	Signature         repository.Signature
 	RedirectURL       string // non-empty when document has a callback_url
 }
@@ -373,6 +374,7 @@ func (s *SignService) Sign(ctx context.Context, input SignInput) (*SignResult, e
 	return &SignResult{
 		SignatureID:       createdSig.ID,
 		SignedDocumentURL: newKey,
+		S3KeySigned:       newKey,
 		Signature:         createdSig,
 		RedirectURL:       redirectURL,
 	}, nil
