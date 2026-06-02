@@ -274,6 +274,38 @@ type Signature struct {
 	SignedAt      time.Time      `json:"signed_at"`
 }
 
+type SigningSession struct {
+	ID             uuid.UUID      `json:"id"`
+	TenantID       uuid.UUID      `json:"tenant_id"`
+	ApplicationID  sql.NullString `json:"application_id"`
+	SignerRole     string         `json:"signer_role"`
+	CallbackUrl    sql.NullString `json:"callback_url"`
+	CallbackSecret sql.NullString `json:"callback_secret"`
+	Status         string         `json:"status"`
+	ExpiresAt      time.Time      `json:"expires_at"`
+	CreatedAt      time.Time      `json:"created_at"`
+	UpdatedAt      time.Time      `json:"updated_at"`
+}
+
+type SigningSessionDocument struct {
+	ID             uuid.UUID      `json:"id"`
+	SessionID      uuid.UUID      `json:"session_id"`
+	DocumentName   string         `json:"document_name"`
+	SourceUrl      string         `json:"source_url"`
+	TargetUrl      sql.NullString `json:"target_url"`
+	TargetS3Key    sql.NullString `json:"target_s3_key"`
+	ContentHash    string         `json:"content_hash"`
+	CachedS3Key    sql.NullString `json:"cached_s3_key"`
+	SignedS3Key    sql.NullString `json:"signed_s3_key"`
+	CmsS3Key       sql.NullString `json:"cms_s3_key"`
+	Status         string         `json:"status"`
+	LastError      sql.NullString `json:"last_error"`
+	UploadAttempts int32          `json:"upload_attempts"`
+	SignedAt       sql.NullTime   `json:"signed_at"`
+	UploadedAt     sql.NullTime   `json:"uploaded_at"`
+	CreatedAt      time.Time      `json:"created_at"`
+}
+
 type Tenant struct {
 	ID        uuid.UUID  `json:"id"`
 	Name      string     `json:"name"`
