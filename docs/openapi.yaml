@@ -1,0 +1,1274 @@
+openapi: 3.0.0
+info:
+  title: PKI Service API
+  version: 1.0.0
+  description: |
+    Сервис электронной подписи документов с использованием ЭЦП РК (НУЦ РК).
+    Поддерживает одиночное и пакетное подписание, интеграцию с корпоративным
+    S3, BPM workflow и hash-based подписание через NCALayer.
+
+    ## Аутентификация
+    - `ApiKeyAuth` — `Authorization: Bearer <api_key>` (длинный токен без точек).
+    - `BearerAuth` — JWT, выданный `/auth/login` или `/auth/register`.
+
+    На `/api/v1/*` принимаются оба варианта (`DualAuth`). На `/auth/me` и
+    `/auth/logout` — только JWT. На `/api/admin/*` — JWT + роль admin.
+
+    ## Контуры
+    - test: `http://localhost:8080`
+    - prod: `https://pki-service.darch.pro`
+
+    ## Примечания
+    Некоторые request/response поля задокументированы на основе кода
+    хендлеров; для нетривиальных потоков (sign/initiate, applications)
+    точный JSON-контракт смотри в `internal/handler/*.go`.
+  contact:
+    email: admin@darch.pro
+
+servers:
+  - url: https://pki-service.darch.pro
+    description: Production
+
+tags:
+  - name: Health
+    description: Health/status
+  - name: Auth
+    description: Регистрация, логин, текущий пользователь
+  - name: Verify
+    description: Публичная страница верификации подписи (HTML)
+  - name: Documents
+    description: CRUD документов, синхронная и асинхронная подпись
+  - name: Batch
+    description: Пакетная загрузка/подписание
+  - name: SessionSigning
+    description: Сессионное (hash-flow) подписание через NCALayer
+  - name: Applications
+    description: BPM-интеграция, batch-workflow
+  - name: Webhooks
+    description: Подписки на события и тестовая доставка
+  - name: Admin
+    description: Управление тенантами, API-ключами, пользователями
+  - name: Demo
+    description: Демо-эндпоинты для фронтенда (без auth)
+
+security:
+  - ApiKeyAuth: []
+  - BearerAuth: []
+
+paths:
+  # ───────── Health ─────────
+  /health:
+    get:
+      tags: [Health]
+      security: []
+      summary: Состояние сервиса
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, example: ok }
+                  env: { type: string, example: prod }
+                  workers:
+                    type: object
+                    additionalProperties: { type: string, example: running }
+                  storage:
+                    type: object
+                    additionalProperties: { type: string, example: ok }
+
+  # ───────── Auth ─────────
+  /auth/register:
+    post:
+      tags: [Auth]
+      security: []
+      summary: Регистрация пользователя
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password, name]
+              properties:
+                email: { type: string, format: email }
+                password: { type: string, minLength: 8 }
+                name: { type: string }
+      responses:
+        '201':
+          description: Создан
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '422': { $ref: '#/components/responses/Unprocessable' }
+
+  /auth/login:
+    post:
+      tags: [Auth]
+      security: []
+      summary: Логин
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email: { type: string, format: email }
+                password: { type: string }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AuthResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /auth/me:
+    get:
+      tags: [Auth]
+      security:
+        - BearerAuth: []
+      summary: Текущий пользователь
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id: { type: string, format: uuid }
+                  email: { type: string }
+                  name: { type: string }
+                  role: { type: string, enum: [user, admin] }
+                  tenant_id: { type: string, format: uuid }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /auth/logout:
+    post:
+      tags: [Auth]
+      security:
+        - BearerAuth: []
+      summary: Логаут
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean, example: true }
+
+  # ───────── Verify (public HTML) ─────────
+  /verify/{signature_id}:
+    get:
+      tags: [Verify]
+      security: []
+      summary: Публичная страница верификации подписи
+      description: HTML-страница с данными подписи и QR-кодом.
+      parameters:
+        - name: signature_id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: HTML-страница верификации
+          content:
+            text/html:
+              schema: { type: string }
+        '404':
+          description: Подпись не найдена
+          content:
+            text/html:
+              schema: { type: string }
+
+  # ───────── Documents ─────────
+  /api/v1/documents:
+    post:
+      tags: [Documents]
+      summary: Создать запись документа по существующему S3-ключу
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [s3_key]
+              properties:
+                s3_key: { type: string, example: tenant_uuid/path/file.pdf }
+                title: { type: string, example: Договор № 12 }
+                metadata:
+                  type: object
+                  additionalProperties: true
+      responses:
+        '201':
+          description: Создан
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      id: { type: string, format: uuid }
+                      status: { type: string, enum: [draft, pending, partially_signed, signed, rejected] }
+                      created_at: { type: string, format: date-time }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /api/v1/documents/{id}:
+    get:
+      tags: [Documents]
+      summary: Получить документ + список подписей
+      parameters:
+        - $ref: '#/components/parameters/DocumentID'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/Document' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/v1/documents/{id}/sign:
+    post:
+      tags: [Documents]
+      summary: Синхронно подписать документ
+      description: |
+        Принимает CMS-подпись от NCALayer, верифицирует через NCANode,
+        собирает новую версию PDF с QR-штампом и «Листом подписей»,
+        обновляет статус документа.
+      parameters:
+        - $ref: '#/components/parameters/DocumentID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [cms]
+              properties:
+                cms:
+                  type: string
+                  description: Base64 CMS (PKCS#7)
+                role:
+                  type: string
+                  example: client
+                  description: client / factor / director / ...
+      responses:
+        '200':
+          description: Подписано
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      signature_id: { type: string, format: uuid }
+                      signed_document_url: { type: string, example: tenant/doc/v2.pdf }
+                      signature: { $ref: '#/components/schemas/Signature' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/Unprocessable' }
+
+  /api/v1/documents/{id}/sign-async:
+    post:
+      tags: [Documents]
+      summary: Поставить подпись в фон, вернуть 202
+      parameters:
+        - $ref: '#/components/parameters/DocumentID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [cms]
+              properties:
+                cms: { type: string }
+                role: { type: string }
+      responses:
+        '202':
+          description: Принято, обработка в фоне
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      task_id: { type: string, format: uuid }
+                      status: { type: string, example: processing }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /api/v1/documents/{id}/sign-status:
+    get:
+      tags: [Documents]
+      summary: Статус асинхронного подписания
+      parameters:
+        - $ref: '#/components/parameters/DocumentID'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, enum: [pending, processing, signed, failed] }
+                  signed_document_url: { type: string, nullable: true }
+                  error: { type: string, nullable: true }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/v1/upload:
+    post:
+      tags: [Documents]
+      summary: Загрузить файл документа в S3 и создать запись
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+                title: { type: string }
+      responses:
+        '201':
+          description: Создан
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/Document' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /api/v1/documents/{id}/file:
+    get:
+      tags: [Documents]
+      summary: Скачать текущую версию PDF
+      parameters:
+        - $ref: '#/components/parameters/DocumentID'
+      responses:
+        '200':
+          description: PDF
+          content:
+            application/pdf:
+              schema:
+                type: string
+                format: binary
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  # ───────── Batch ─────────
+  /api/v1/batch/upload:
+    post:
+      tags: [Batch]
+      summary: Пакетная загрузка документов
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [files]
+              properties:
+                files:
+                  type: array
+                  items: { type: string, format: binary }
+      responses:
+        '201':
+          description: Создан
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      documents:
+                        type: array
+                        items: { $ref: '#/components/schemas/Document' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /api/v1/batch/sign:
+    post:
+      tags: [Batch]
+      summary: Пакетное подписание
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [signatures]
+              properties:
+                signatures:
+                  type: array
+                  items:
+                    type: object
+                    required: [document_id, cms]
+                    properties:
+                      document_id: { type: string, format: uuid }
+                      cms: { type: string }
+                      role: { type: string }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      results:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            document_id: { type: string, format: uuid }
+                            status: { type: string, enum: [signed, failed] }
+                            signature_id: { type: string, format: uuid, nullable: true }
+                            error: { type: string, nullable: true }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  # ───────── Session signing ─────────
+  /api/v1/sign/initiate:
+    post:
+      tags: [SessionSigning]
+      summary: Создать сессию подписания и поставить документы в очередь скачивания
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [documents, signer_role]
+              properties:
+                signer_role: { type: string, example: client }
+                callback_url: { type: string, format: uri }
+                documents:
+                  type: array
+                  items:
+                    type: object
+                    required: [url]
+                    properties:
+                      url: { type: string, format: uri, description: S3 URL клиента }
+                      name: { type: string }
+                      external_id: { type: string }
+      responses:
+        '201':
+          description: Сессия создана
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/SigningSession' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /api/v1/sign/complete:
+    post:
+      tags: [SessionSigning]
+      summary: Завершить сессию — принять CMS, собрать PDF, залить в S3 клиента
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [session_id, signatures]
+              properties:
+                session_id: { type: string, format: uuid }
+                signatures:
+                  type: array
+                  items:
+                    type: object
+                    required: [document_id, cms]
+                    properties:
+                      document_id: { type: string, format: uuid }
+                      cms: { type: string, description: Base64 detached CMS }
+      responses:
+        '200':
+          description: Завершено
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      session_id: { type: string, format: uuid }
+                      status: { type: string, example: signed }
+                      documents:
+                        type: array
+                        items: { $ref: '#/components/schemas/SessionDocument' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/Unprocessable' }
+
+  /api/v1/sign/status/{session_id}:
+    get:
+      tags: [SessionSigning]
+      summary: Статус сессии
+      parameters:
+        - name: session_id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/SigningSession' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/v1/sign/refresh-urls:
+    patch:
+      tags: [SessionSigning]
+      summary: Перевыпустить presigned URL для документов сессии
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [session_id]
+              properties:
+                session_id: { type: string, format: uuid }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      documents:
+                        type: array
+                        items: { $ref: '#/components/schemas/SessionDocument' }
+
+  # ───────── Applications ─────────
+  /api/v1/applications/{external_id}/submit:
+    post:
+      tags: [Applications]
+      summary: Создать/обновить заявку (BPM-вход)
+      parameters:
+        - $ref: '#/components/parameters/ExternalID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [documents]
+              properties:
+                callback_url: { type: string, format: uri }
+                signer_role: { type: string }
+                documents:
+                  type: array
+                  items:
+                    type: object
+                    required: [url]
+                    properties:
+                      url: { type: string, format: uri }
+                      name: { type: string }
+                      external_id: { type: string }
+      responses:
+        '201':
+          description: Создана
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/Application' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /api/v1/applications/{external_id}/sign:
+    post:
+      tags: [Applications]
+      summary: Подписать документы заявки
+      parameters:
+        - $ref: '#/components/parameters/ExternalID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [signatures]
+              properties:
+                signatures:
+                  type: array
+                  items:
+                    type: object
+                    required: [document_id, cms]
+                    properties:
+                      document_id: { type: string, format: uuid }
+                      cms: { type: string }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/Application' }
+        '422': { $ref: '#/components/responses/Unprocessable' }
+
+  /api/v1/applications/{external_id}/status:
+    get:
+      tags: [Applications]
+      summary: Статус заявки
+      parameters:
+        - $ref: '#/components/parameters/ExternalID'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/Application' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/v1/applications/{external_id}/cancel:
+    post:
+      tags: [Applications]
+      summary: Отменить заявку
+      parameters:
+        - $ref: '#/components/parameters/ExternalID'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/Application' }
+
+  /api/v1/applications/{external_id}/refresh-urls:
+    patch:
+      tags: [Applications]
+      summary: Перевыпустить presigned URL у документов заявки
+      parameters:
+        - $ref: '#/components/parameters/ExternalID'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/Application' }
+
+  /api/v1/applications/{external_id}/retry-upload:
+    post:
+      tags: [Applications]
+      summary: Повторить выгрузку подписанных файлов в S3 клиента
+      parameters:
+        - $ref: '#/components/parameters/ExternalID'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/Application' }
+
+  # ───────── Webhooks ─────────
+  /api/v1/webhooks:
+    get:
+      tags: [Webhooks]
+      summary: Список подписок
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/Webhook' }
+    post:
+      tags: [Webhooks]
+      summary: Создать подписку
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [url, events]
+              properties:
+                url: { type: string, format: uri }
+                events:
+                  type: array
+                  items: { type: string, example: signature.added }
+                secret: { type: string, description: HMAC-секрет }
+      responses:
+        '201':
+          description: Создана
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/Webhook' }
+
+  /api/v1/webhooks/{webhook_id}:
+    delete:
+      tags: [Webhooks]
+      summary: Удалить подписку
+      parameters:
+        - name: webhook_id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '204': { description: Удалена }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/v1/webhooks/{webhook_id}/test:
+    post:
+      tags: [Webhooks]
+      summary: Отправить тестовый webhook
+      parameters:
+        - name: webhook_id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status_code: { type: integer, example: 200 }
+                  body: { type: string }
+
+  # ───────── Admin ─────────
+  /api/admin/tenants:
+    get:
+      tags: [Admin]
+      security:
+        - BearerAuth: []
+      summary: Список тенантов
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/Tenant' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [Admin]
+      security:
+        - BearerAuth: []
+      summary: Создать тенант
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, type]
+              properties:
+                name: { type: string }
+                type: { type: string, enum: [individual, legal_entity] }
+      responses:
+        '201':
+          description: Создан
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/Tenant' }
+
+  /api/admin/tenants/{tenant_id}/keys:
+    get:
+      tags: [Admin]
+      security:
+        - BearerAuth: []
+      summary: Список API-ключей тенанта
+      parameters:
+        - $ref: '#/components/parameters/TenantID'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/ApiKey' }
+    post:
+      tags: [Admin]
+      security:
+        - BearerAuth: []
+      summary: Сгенерировать API-ключ
+      parameters:
+        - $ref: '#/components/parameters/TenantID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [label]
+              properties:
+                label: { type: string }
+                expires_at: { type: string, format: date-time, nullable: true }
+      responses:
+        '201':
+          description: Ключ создан, plaintext возвращается ОДИН раз
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      api_key: { type: string, description: plaintext API-ключ (вернётся только в этом ответе) }
+                      key: { $ref: '#/components/schemas/ApiKey' }
+
+  /api/admin/tenants/{tenant_id}/keys/{key_id}:
+    delete:
+      tags: [Admin]
+      security:
+        - BearerAuth: []
+      summary: Деактивировать ключ
+      parameters:
+        - $ref: '#/components/parameters/TenantID'
+        - name: key_id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '204': { description: Деактивирован }
+
+  /api/admin/users:
+    get:
+      tags: [Admin]
+      security:
+        - BearerAuth: []
+      summary: Список пользователей
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: { type: string, format: uuid }
+                        email: { type: string }
+                        name: { type: string }
+                        role: { type: string, enum: [user, admin] }
+                        tenant_id: { type: string, format: uuid }
+    post:
+      tags: [Admin]
+      security:
+        - BearerAuth: []
+      summary: Создать пользователя
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password, name, tenant_id]
+              properties:
+                email: { type: string, format: email }
+                password: { type: string, minLength: 8 }
+                name: { type: string }
+                role: { type: string, enum: [user, admin], default: user }
+                tenant_id: { type: string, format: uuid }
+      responses:
+        '201': { description: Создан }
+
+  /api/admin/users/{user_id}:
+    patch:
+      tags: [Admin]
+      security:
+        - BearerAuth: []
+      summary: Обновить пользователя
+      parameters:
+        - name: user_id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: { type: string }
+                role: { type: string, enum: [user, admin] }
+                tenant_id: { type: string, format: uuid }
+      responses:
+        '200': { description: OK }
+    delete:
+      tags: [Admin]
+      security:
+        - BearerAuth: []
+      summary: Удалить пользователя
+      parameters:
+        - name: user_id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '204': { description: Удалён }
+
+  # ───────── Demo ─────────
+  /api/demo/upload:
+    post:
+      tags: [Demo]
+      security: []
+      summary: Демо-загрузка PDF (без auth)
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id: { type: string, format: uuid }
+                  url: { type: string, format: uri }
+
+  /api/demo/download/{id}:
+    get:
+      tags: [Demo]
+      security: []
+      summary: Скачать загруженный демо-файл
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: PDF
+          content:
+            application/pdf:
+              schema:
+                type: string
+                format: binary
+        '404': { $ref: '#/components/responses/NotFound' }
+
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: http
+      scheme: bearer
+      description: API-ключ в заголовке `Authorization: Bearer <api_key>` (длинный токен без точек).
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  parameters:
+    DocumentID:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    TenantID:
+      name: tenant_id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    ExternalID:
+      name: external_id
+      in: path
+      required: true
+      schema: { type: string }
+
+  responses:
+    BadRequest:
+      description: Невалидный запрос
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Unauthorized:
+      description: Не авторизован
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Forbidden:
+      description: Доступ запрещён
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    NotFound:
+      description: Не найдено
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Unprocessable:
+      description: Бизнес-ошибка (невалидный CMS, отозванный сертификат и т.п.)
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    ServerError:
+      description: Внутренняя ошибка
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+
+  schemas:
+    Error:
+      type: object
+      properties:
+        error:
+          type: object
+          properties:
+            code: { type: string, example: CMS_INVALID }
+            message: { type: string, example: CMS signature is invalid }
+
+    AuthResponse:
+      type: object
+      properties:
+        user:
+          type: object
+          properties:
+            id: { type: string, format: uuid }
+            email: { type: string }
+            name: { type: string }
+            role: { type: string, enum: [user, admin] }
+            tenant_id: { type: string, format: uuid }
+        token:
+          type: string
+          description: JWT, время жизни 24ч
+
+    Document:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        tenant_id: { type: string, format: uuid }
+        title: { type: string, nullable: true }
+        s3_key_original: { type: string }
+        s3_key_current: { type: string }
+        current_version: { type: integer }
+        status:
+          type: string
+          enum: [draft, pending, partially_signed, signed, rejected]
+        metadata:
+          type: object
+          additionalProperties: true
+          nullable: true
+        signatures:
+          type: array
+          items: { $ref: '#/components/schemas/Signature' }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
+    Signature:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        document_id: { type: string, format: uuid }
+        version_number: { type: integer }
+        sequence_num: { type: integer }
+        role: { type: string }
+        signer_name: { type: string }
+        signer_iin: { type: string, nullable: true }
+        signer_bin: { type: string, nullable: true }
+        org_name: { type: string, nullable: true }
+        signer_type: { type: string, enum: [individual, legal_entity_rep] }
+        basis: { type: string, nullable: true }
+        cert_serial: { type: string }
+        cert_not_before: { type: string, format: date-time }
+        cert_not_after: { type: string, format: date-time }
+        ca_name: { type: string }
+        ocsp_status: { type: string, enum: [good, revoked, unknown] }
+        ocsp_checked_at: { type: string, format: date-time }
+        tsp_time: { type: string, format: date-time, nullable: true }
+        sha256_hash: { type: string }
+        sign_format: { type: string, example: CAdES (CMS, PKCS#7) }
+        qr_url: { type: string, format: uri }
+        signed_at: { type: string, format: date-time }
+
+    SigningSession:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        tenant_id: { type: string, format: uuid }
+        signer_role: { type: string }
+        status:
+          type: string
+          enum: [pending, fetching, ready, signing, signed, failed, expired]
+        callback_url: { type: string, format: uri, nullable: true }
+        documents:
+          type: array
+          items: { $ref: '#/components/schemas/SessionDocument' }
+        created_at: { type: string, format: date-time }
+        expires_at: { type: string, format: date-time }
+
+    SessionDocument:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        session_id: { type: string, format: uuid }
+        external_id: { type: string, nullable: true }
+        source_url: { type: string, format: uri }
+        cached_url: { type: string, format: uri, nullable: true, description: presigned URL для скачивания оригинала }
+        signed_url: { type: string, format: uri, nullable: true }
+        sha256: { type: string, nullable: true, description: SHA-256 hex от байт PDF }
+        sha256_b64: { type: string, nullable: true, description: SHA-256 base64, передаётся NCALayer }
+        status:
+          type: string
+          enum: [pending, cached, signed, failed]
+
+    Application:
+      type: object
+      properties:
+        external_id: { type: string }
+        tenant_id: { type: string, format: uuid }
+        status:
+          type: string
+          enum: [pending, ready, signed, uploaded, failed, cancelled]
+        callback_url: { type: string, format: uri, nullable: true }
+        signer_role: { type: string, nullable: true }
+        documents:
+          type: array
+          items: { $ref: '#/components/schemas/ApplicationDocument' }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
+    ApplicationDocument:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        external_id: { type: string, nullable: true }
+        source_url: { type: string, format: uri }
+        cached_url: { type: string, format: uri, nullable: true }
+        signed_url: { type: string, format: uri, nullable: true }
+        status:
+          type: string
+          enum: [pending, cached, signed, uploaded, failed]
+
+    Webhook:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        tenant_id: { type: string, format: uuid }
+        url: { type: string, format: uri }
+        events:
+          type: array
+          items: { type: string, example: signature.added }
+        is_active: { type: boolean }
+        created_at: { type: string, format: date-time }
+
+    Tenant:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        type: { type: string, enum: [individual, legal_entity] }
+        is_active: { type: boolean }
+        created_at: { type: string, format: date-time }
+
+    ApiKey:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        tenant_id: { type: string, format: uuid }
+        label: { type: string }
+        is_active: { type: boolean }
+        last_used_at: { type: string, format: date-time, nullable: true }
+        expires_at: { type: string, format: date-time, nullable: true }
+        created_at: { type: string, format: date-time }
+
+    SignatureVerification:
+      type: object
+      description: Данные, отображаемые на публичной HTML-странице /verify/{signature_id}.
+      properties:
+        signer_name: { type: string }
+        masked_iin: { type: string, example: 8904****1782 }
+        signer_bin: { type: string, nullable: true }
+        org_name: { type: string, nullable: true }
+        signer_type: { type: string, enum: [individual, legal_entity_rep] }
+        basis: { type: string, nullable: true }
+        ca_name: { type: string }
+        cert_serial_short: { type: string, example: 2F:5...:CD }
+        cert_not_before: { type: string, format: date }
+        cert_not_after: { type: string, format: date }
+        sign_format: { type: string, example: CAdES (CMS, PKCS#7) }
+        sha256_short: { type: string, example: 125939f4...71ece070 }
+        signed_at: { type: string, format: date-time }
+        qr_data_uri: { type: string, description: data:image/png;base64,... }

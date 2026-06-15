@@ -31,6 +31,9 @@ COPY --from=builder /out/pki-seed .
 # Конфиги
 COPY configs/ ./configs/
 
+# OpenAPI / Swagger UI
+COPY docs/ ./docs/
+
 EXPOSE 8080
 
 CMD ["/app/pki-api"]

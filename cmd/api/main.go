@@ -209,6 +209,15 @@ func main() {
 		pub.Get("/verify/{signature_id}", verifyHandler.HandleVerify)
 	})
 
+	// API docs — public, без auth, без rate-limit.
+	r.Get("/api/docs", func(w http.ResponseWriter, req *http.Request) {
+		http.ServeFile(w, req, "docs/swagger.html")
+	})
+	r.Get("/api/docs/openapi.yaml", func(w http.ResponseWriter, req *http.Request) {
+		w.Header().Set("Content-Type", "application/yaml")
+		http.ServeFile(w, req, "docs/openapi.yaml")
+	})
+
 	// Auth routes — public (no auth required).
 	r.Post("/auth/register", authHandler.HandleRegister)
 	r.Post("/auth/login", authHandler.HandleLogin)
