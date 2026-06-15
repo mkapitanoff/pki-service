@@ -597,8 +597,41 @@ curl -s https://pki-service.darch.pro/health
 - [x] Модуль 6: API-key auth middleware + tenant context
 - [x] Модуль 7: Публичный /verify/:signature_id (HTML)
 - [x] Модуль 10: Email+пароль auth (JWT) + admin seed
-- [ ] Модуль 8: RabbitMQ + Webhook delivery
-- [ ] Модуль 9: Тесты (unit + integration)
+- [x] Модуль 8: RabbitMQ + Webhook delivery ✅ DONE
+  - RabbitMQ consumers в cmd/worker
+  - webhook_delivery_poller, webhook_dispatcher, service/webhook_fanout
+  - HMAC доставка с ретраями
+  - CRUD /webhooks + /webhooks/{id}/test
+- [x] Модуль 9: Тесты (unit + integration) ✅ DONE
+  - verify_test.go
+  - sign_test.go
+  - sign_session_test.go
+  - 9 интеграционных тестов
+
+---
+
+## Session-based signing (hash-flow)
+
+Эндпоинты реализованы:
+  POST /api/v1/sign/initiate   — создаёт сессию, скачивает и кэширует документы
+  POST /api/v1/sign/complete   — верифицирует CMS, embed, PUT в S3 клиента
+  GET  /api/v1/sign/status/{session_id}
+  PATCH /api/v1/sign/refresh-urls
+
+Воркеры:
+  document_fetcher  — фоновое скачивание документов из S3 клиента
+  session_cleanup   — TTL истёкших сессий и кэша в MinIO
+
+Интеграция NCALayer:
+  Модуль: kz.gov.pki.knca.basics
+  Метод: sign с signingParams.digested=true (hash-режим)
+  CMS формат: detached (encapsulate: false)
+  Хэш: SHA-256 от байт PDF, base64 для NCALayer, hex для БД
+
+MinIO bucket-ы:
+  pki-cache   — оригиналы (TTL 24h)
+  pki-signed  — копии подписанных (TTL 7d)
+  pki-cms     — архив CMS (permanent)
 
 ---
 

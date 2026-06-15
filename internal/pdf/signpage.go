@@ -16,6 +16,25 @@ import (
 	"github.com/pdfcpu/pdfcpu/pkg/pdfcpu/model"
 )
 
+// blankPagesJSON возвращает pdfcpu "create" JSON с n пустыми A4-страницами.
+// pdfcpu требует, чтобы у каждой страницы было content — кладём один
+// почти-невидимый пробел (size 1pt). Используется тестами этого пакета.
+func blankPagesJSON(n int) string {
+	if n < 1 {
+		n = 1
+	}
+	var b strings.Builder
+	b.WriteString(`{"pages":{`)
+	for i := 1; i <= n; i++ {
+		if i > 1 {
+			b.WriteByte(',')
+		}
+		fmt.Fprintf(&b, `"%d":{"content":{"text":[{"value":" ","pos":[40,40],"font":{"name":"Helvetica","size":1}}]}}`, i)
+	}
+	b.WriteString(`}}`)
+	return b.String()
+}
+
 // SignatureInfo is one rendered entry on the "Лист подписей" page.
 type SignatureInfo struct {
 	SignerName    string

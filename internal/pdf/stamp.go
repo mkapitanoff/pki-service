@@ -3,6 +3,7 @@ package pdf
 import (
 	"bytes"
 	"fmt"
+	"image/png"
 	"os"
 	"path/filepath"
 
@@ -20,15 +21,18 @@ type QRStamp struct {
 	PageCount  int
 }
 
-const (
-	stampSizePt = 80
-	stampGapPt  = 10
-	stampMargin = 24
-)
-
-// AddQRStamps overlays each stamp's QR (80×80pt) on the bottom-left of every
-// page, laid out left-to-right with a 10pt gap.
-// Under each QR the label "Proverit ECP" is printed (Latin, Helvetica-safe).
+// AddQRStamps накладывает на каждую страницу PDF QR-штампы.
+// Размеры и отступы — в internal/pdf/stamp_config.go (QRStampSizeMM и т.д.).
+// Якорь — правый нижний угол страницы, штампы укладываются справа налево
+// с зазором QRStampGapMM.
+//
+// TODO: белая подложка под QR (QRStampBGPadding). pdfcpu image-watermark API
+// не рисует фон под изображением. Корректная реализация требует либо
+// отдельной оверлей-страницы, отрендеренной через pdfcpu primitives и
+// слитой со страницей, либо подгонки text-watermark с bgcolor/margins
+// под размер QR (хрупко, шрифто-зависимо). Оставлено как известное
+// ограничение — QR размещён в чистом нижнем-правом углу, где
+// заполненной области, как правило, нет.
 func AddQRStamps(pdfBytes []byte, stamps []QRStamp) ([]byte, error) {
 	if len(stamps) == 0 {
 		cp := make([]byte, len(pdfBytes))
@@ -49,47 +53,47 @@ func AddQRStamps(pdfBytes []byte, stamps []QRStamp) ([]byte, error) {
 	cur := make([]byte, len(pdfBytes))
 	copy(cur, pdfBytes)
 
-	// Use Cyrillic label if a Unicode font was loaded, otherwise Latin fallback.
-	label := "Proverit ECP"
-	if cyrillicEnabled {
-		label = "Проверить ЭЦП"
-	}
+	const (
+		qrSizePt   = QRStampSizeMM * MMToPt
+		rightPt    = QRStampMarginRight * MMToPt
+		bottomPt   = QRStampMarginBottom * MMToPt
+		gapPt      = QRStampGapMM * MMToPt
+	)
 
 	for i, st := range stamps {
-		xOff := stampMargin + i*(stampSizePt+stampGapPt)
+		// Натуральный размер PNG → absolute scale для нужного pt-размера.
+		cfg, err := png.DecodeConfig(bytes.NewReader(st.QRImagePNG))
+		if err != nil {
+			return nil, fmt.Errorf("pdf: decode qr png: %w", err)
+		}
+		if cfg.Width <= 0 {
+			return nil, fmt.Errorf("pdf: qr png has zero width")
+		}
+		scale := qrSizePt / float64(cfg.Width)
 
-		// --- QR image ---
+		// pdfcpu: BottomRight кладёт image правым-нижним углом к (W, 0);
+		// off:Dx Dy сдвигает оттуда. Dx<0 — влево, Dy>0 — вверх.
+		// Штампы укладываем справа налево.
+		dx := -(rightPt + float64(i)*(qrSizePt+gapPt))
+		dy := bottomPt
+
 		imgPath := filepath.Join(tmpDir, fmt.Sprintf("qr-%d.png", i))
 		if err := os.WriteFile(imgPath, st.QRImagePNG, 0o600); err != nil {
 			return nil, fmt.Errorf("pdf: write qr image: %w", err)
 		}
 		imgDesc := fmt.Sprintf(
-			"pos:bl, off:%d %d, scale:0.12 rel, rot:0, opacity:1",
-			xOff, stampMargin+12,
+			"pos:br, off:%.2f %.2f, scale:%.4f abs, rot:0, opacity:1",
+			dx, dy, scale,
 		)
 		imgWM, err := pdfcpu.ParseImageWatermarkDetails(imgPath, imgDesc, true, types.POINTS)
 		if err != nil {
 			return nil, fmt.Errorf("pdf: parse qr stamp: %w", err)
 		}
-		var afterImg bytes.Buffer
-		if err := api.AddWatermarks(bytes.NewReader(cur), &afterImg, nil, imgWM, conf); err != nil {
+		var after bytes.Buffer
+		if err := api.AddWatermarks(bytes.NewReader(cur), &after, nil, imgWM, conf); err != nil {
 			return nil, fmt.Errorf("pdf: apply qr stamp: %w", err)
 		}
-
-		// --- Label under QR ("Проверить ЭЦП" / "Proverit ECP") ---
-		txtDesc := fmt.Sprintf(
-			"font:%s, points:6, scale:1 abs, pos:bl, off:%d %d, rot:0, fillc:#000000, opacity:1",
-			activeFontName, xOff, stampMargin,
-		)
-		txtWM, err := pdfcpu.ParseTextWatermarkDetails(label, txtDesc, true, types.POINTS)
-		if err != nil {
-			return nil, fmt.Errorf("pdf: parse stamp label: %w", err)
-		}
-		var afterTxt bytes.Buffer
-		if err := api.AddWatermarks(bytes.NewReader(afterImg.Bytes()), &afterTxt, nil, txtWM, conf); err != nil {
-			return nil, fmt.Errorf("pdf: apply stamp label: %w", err)
-		}
-		cur = afterTxt.Bytes()
+		cur = after.Bytes()
 	}
 
 	return cur, nil
