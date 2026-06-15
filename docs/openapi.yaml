@@ -1035,7 +1035,7 @@ components:
     ApiKeyAuth:
       type: http
       scheme: bearer
-      description: API-ключ в заголовке `Authorization: Bearer <api_key>` (длинный токен без точек).
+      description: "API-ключ в заголовке `Authorization: Bearer <api_key>` (длинный токен без точек)."
     BearerAuth:
       type: http
       scheme: bearer
