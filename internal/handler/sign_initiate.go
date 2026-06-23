@@ -2,12 +2,14 @@ package handler
 
 import (
 	"context"
+	"database/sql"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/url"
+	"strings"
 	"sync"
 	"time"
 
@@ -21,26 +23,39 @@ import (
 
 // SignInitiateHandler handles POST /api/v1/sign/initiate.
 type SignInitiateHandler struct {
-	queries *repository.Queries
-	extS3   s3client.ExternalS3Client
-	store   storage.Storage
+	queries        *repository.Queries
+	extS3          s3client.ExternalS3Client
+	store          storage.Storage
+	allowedBuckets map[string]bool // whitelist для s3_bucket (пустой = no whitelist)
 }
 
 func NewSignInitiateHandler(
 	queries *repository.Queries,
 	extS3 s3client.ExternalS3Client,
 	store storage.Storage,
+	allowedBuckets []string,
 ) *SignInitiateHandler {
-	return &SignInitiateHandler{queries: queries, extS3: extS3, store: store}
+	wl := make(map[string]bool, len(allowedBuckets))
+	for _, b := range allowedBuckets {
+		wl[b] = true
+	}
+	return &SignInitiateHandler{queries: queries, extS3: extS3, store: store, allowedBuckets: wl}
 }
 
 // --- request / response types ---
 
 type initiateDocInput struct {
-	Name        string `json:"name"`
-	SourceURL   string `json:"source_url"`
-	TargetURL   string `json:"target_url"`
-	TargetS3Key string `json:"target_s3_key"`
+	ID            string `json:"id"`              // внешний ID документа (опц., для логов)
+	Name          string `json:"name"`
+	SourceURL     string `json:"source_url"`
+	TargetURL     string `json:"target_url"`
+	TargetS3Key   string `json:"target_s3_key"`
+	S3Bucket      string `json:"s3_bucket,omitempty"`      // client-mode
+	S3Key         string `json:"s3_key,omitempty"`         // client-mode
+	Hash          string `json:"hash,omitempty"`           // base64 SHA-256, client-mode
+	HashAlgorithm string `json:"hash_algorithm,omitempty"` // "SHA256"
+	Size          int64  `json:"size,omitempty"`
+	ContentType   string `json:"content_type,omitempty"`
 }
 
 type initiateRequest struct {
@@ -85,6 +100,9 @@ func (h *SignInitiateHandler) HandleInitiate(w http.ResponseWriter, r *http.Requ
 		respondError(w, apperr.ErrInvalidRequest.WithCause(fmt.Errorf("documents must have 1–20 items")))
 		return
 	}
+	// Распарсенные client-mode-хэши (hex) для каждого документа; пустая
+	// строка означает legacy режим (фетчер посчитает сам).
+	clientHashHex := make([]string, len(req.Documents))
 	for i, d := range req.Documents {
 		if d.Name == "" {
 			respondError(w, apperr.ErrInvalidRequest.WithCause(fmt.Errorf("documents[%d].name is required", i)))
@@ -97,6 +115,30 @@ func (h *SignInitiateHandler) HandleInitiate(w http.ResponseWriter, r *http.Requ
 		if err := validateHTTPSURL(d.TargetURL); err != nil {
 			respondError(w, apperr.ErrInvalidRequest.WithCause(fmt.Errorf("documents[%d].target_url: %w", i, err)))
 			return
+		}
+		// client-mode: hash пришёл от Lovable, его сразу принимаем как авторитетный.
+		if d.Hash != "" {
+			hh, perr := parseClientHash(d.Hash, d.HashAlgorithm)
+			if perr != nil {
+				respondError(w, apperr.ErrInvalidRequest.WithCause(fmt.Errorf("documents[%d]: %w", i, perr)))
+				return
+			}
+			clientHashHex[i] = hh
+			// При наличии whitelist бакетов — s3_bucket обязателен и должен быть в нём.
+			if len(h.allowedBuckets) > 0 {
+				if d.S3Bucket == "" {
+					respondError(w, apperr.ErrInvalidRequest.WithCause(fmt.Errorf("documents[%d].s3_bucket is required when hash is provided", i)))
+					return
+				}
+				if !h.allowedBuckets[d.S3Bucket] {
+					respondError(w, apperr.ErrInvalidRequest.WithCause(fmt.Errorf("documents[%d].s3_bucket %q not allowed", i, d.S3Bucket)))
+					return
+				}
+			}
+			if d.S3Key == "" {
+				respondError(w, apperr.ErrInvalidRequest.WithCause(fmt.Errorf("documents[%d].s3_key is required when hash is provided", i)))
+				return
+			}
 		}
 	}
 	if !validSignerRoles[req.SignerRole] {
@@ -130,16 +172,35 @@ func (h *SignInitiateHandler) HandleInitiate(w http.ResponseWriter, r *http.Requ
 		input  initiateDocInput
 	}
 	entries := make([]docEntry, 0, len(req.Documents))
-	for _, d := range req.Documents {
-		appDoc, err := h.queries.CreateSigningSessionDocument(ctx, repository.CreateSigningSessionDocumentParams{
-			SessionID:    session.ID,
-			DocumentName: d.Name,
-			SourceUrl:    d.SourceURL,
-			TargetUrl:    toNullString(d.TargetURL),
-			TargetS3Key:  toNullString(d.TargetS3Key),
-		})
-		if err != nil {
-			respondError(w, apperr.ErrInternal.WithCause(err))
+	for i, d := range req.Documents {
+		var (
+			appDoc repository.SigningSessionDocument
+			cerr   error
+		)
+		if clientHashHex[i] != "" {
+			appDoc, cerr = h.queries.CreateSigningSessionDocumentWithHash(ctx, repository.CreateSigningSessionDocumentWithHashParams{
+				SessionID:         session.ID,
+				DocumentName:      d.Name,
+				SourceUrl:         d.SourceURL,
+				TargetUrl:         toNullString(d.TargetURL),
+				TargetS3Key:       toNullString(d.TargetS3Key),
+				ContentHash:       sql.NullString{String: clientHashHex[i], Valid: true},
+				SourceS3Bucket:    toNullString(d.S3Bucket),
+				SourceS3Key:       toNullString(d.S3Key),
+				SourceContentType: toNullString(d.ContentType),
+				SourceSizeBytes:   sql.NullInt64{Int64: d.Size, Valid: d.Size > 0},
+			})
+		} else {
+			appDoc, cerr = h.queries.CreateSigningSessionDocument(ctx, repository.CreateSigningSessionDocumentParams{
+				SessionID:    session.ID,
+				DocumentName: d.Name,
+				SourceUrl:    d.SourceURL,
+				TargetUrl:    toNullString(d.TargetURL),
+				TargetS3Key:  toNullString(d.TargetS3Key),
+			})
+		}
+		if cerr != nil {
+			respondError(w, apperr.ErrInternal.WithCause(cerr))
 			return
 		}
 		entries = append(entries, docEntry{appDoc: appDoc, input: d})
@@ -178,9 +239,11 @@ func (h *SignInitiateHandler) HandleInitiate(w http.ResponseWriter, r *http.Requ
 		if doc.Status == "ready" {
 			allFailed = false
 			// Convert stored hex hash → base64 for NCALayer.
-			if hashBytes, err := hex.DecodeString(doc.ContentHash); err == nil {
-				rd.Hash = base64.StdEncoding.EncodeToString(hashBytes)
-				rd.HashAlgorithm = "SHA256"
+			if doc.ContentHash.Valid {
+				if hashBytes, err := hex.DecodeString(doc.ContentHash.String); err == nil {
+					rd.Hash = base64.StdEncoding.EncodeToString(hashBytes)
+					rd.HashAlgorithm = "SHA256"
+				}
 			}
 		} else if doc.Status == "fetch_failed" {
 			if doc.LastError.Valid {
@@ -208,6 +271,35 @@ func (h *SignInitiateHandler) HandleInitiate(w http.ResponseWriter, r *http.Requ
 		"expires_at": session.ExpiresAt.UTC().Format(time.RFC3339),
 		"documents":  respDocs,
 	})
+}
+
+// parseClientHash валидирует пришедший от Lovable base64-хэш и возвращает hex.
+// algo: пустое или "SHA256" (case-insensitive, "-" игнорим).
+func parseClientHash(b64, algo string) (string, error) {
+	if a := strings.ToUpper(strings.ReplaceAll(algo, "-", "")); a != "" && a != "SHA256" {
+		return "", fmt.Errorf("unsupported_hash_algorithm: %q", algo)
+	}
+	var (
+		raw []byte
+		err error
+	)
+	raw, err = base64.StdEncoding.DecodeString(b64)
+	if err != nil {
+		raw, err = base64.RawStdEncoding.DecodeString(b64)
+	}
+	if err != nil {
+		raw, err = base64.URLEncoding.DecodeString(b64)
+	}
+	if err != nil {
+		raw, err = base64.RawURLEncoding.DecodeString(b64)
+	}
+	if err != nil {
+		return "", fmt.Errorf("invalid_hash: not base64")
+	}
+	if len(raw) != 32 {
+		return "", fmt.Errorf("invalid_hash: want 32 bytes, got %d", len(raw))
+	}
+	return hex.EncodeToString(raw), nil
 }
 
 // validateHTTPSURL checks that s is a non-empty, parseable HTTPS URL.

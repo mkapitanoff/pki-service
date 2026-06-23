@@ -27,10 +27,12 @@ import (
 
 // SignCompleteHandler handles POST /api/v1/sign/complete.
 type SignCompleteHandler struct {
-	queries *repository.Queries
-	nc      ncanode.NCANodeClient
-	store   storage.Storage
-	extS3   s3client.ExternalS3Client
+	queries                 *repository.Queries
+	nc                      ncanode.NCANodeClient
+	store                   storage.Storage
+	extS3                   s3client.ExternalS3Client
+	verificationEnabled     bool          // фиче-флаг async-сверки
+	verificationInitialWait time.Duration // задержка перед первой попыткой
 }
 
 func NewSignCompleteHandler(
@@ -38,8 +40,20 @@ func NewSignCompleteHandler(
 	nc ncanode.NCANodeClient,
 	store storage.Storage,
 	extS3 s3client.ExternalS3Client,
+	verificationEnabled bool,
+	verificationInitialWait time.Duration,
 ) *SignCompleteHandler {
-	return &SignCompleteHandler{queries: queries, nc: nc, store: store, extS3: extS3}
+	if verificationInitialWait <= 0 {
+		verificationInitialWait = 60 * time.Second
+	}
+	return &SignCompleteHandler{
+		queries:                 queries,
+		nc:                      nc,
+		store:                   store,
+		extS3:                   extS3,
+		verificationEnabled:     verificationEnabled,
+		verificationInitialWait: verificationInitialWait,
+	}
 }
 
 // --- request / response ---
@@ -192,12 +206,18 @@ func (h *SignCompleteHandler) processSig(
 	}
 
 	// 4. Integrity check: extract messageDigest from CMS, compare to stored content_hash.
+	if !doc.ContentHash.Valid || doc.ContentHash.String == "" {
+		// На этапе complete content_hash должен быть выставлен либо клиентом
+		// (hash_source='client'), либо фетчером. Если его нет — sanity fail.
+		return nil, fmt.Errorf("document has no content_hash (fetch may not be complete)")
+	}
+	contentHashHex := doc.ContentHash.String
 	cmsDigest, err := signer.ExtractHashFromCMS(cmsBytes)
 	if err != nil {
 		log.Printf("sign_complete: ExtractHashFromCMS doc=%s: %v (skipping integrity check)", doc.ID, err)
 		// Non-fatal: NCANode verification will catch any forgery.
 	} else {
-		storedHashBytes, hexErr := hex.DecodeString(doc.ContentHash)
+		storedHashBytes, hexErr := hex.DecodeString(contentHashHex)
 		if hexErr != nil {
 			return nil, fmt.Errorf("stored content_hash is not valid hex")
 		}
@@ -208,7 +228,7 @@ func (h *SignCompleteHandler) processSig(
 	}
 
 	// 5. Verify CMS via NCANode.
-	vr, err := h.nc.VerifyCMS(ctx, cmsBase64, doc.ContentHash)
+	vr, err := h.nc.VerifyCMS(ctx, cmsBase64, contentHashHex)
 	if err != nil {
 		switch {
 		case errors.Is(err, ncanode.ErrCMSInvalid):
@@ -254,6 +274,21 @@ func (h *SignCompleteHandler) processSig(
 	})
 	if err != nil {
 		return nil, fmt.Errorf("update after sign: %w", err)
+	}
+
+	// 9a. Поставить документ в очередь async-верификации (внутренний контроль
+	// целостности). Если воркер отключён — пропускаем; verification_status
+	// остаётся NULL, наружу всё равно ничего не светится.
+	if h.verificationEnabled {
+		nextAt := time.Now().Add(h.verificationInitialWait)
+		if err := h.queries.MarkSessionDocumentVerificationPending(ctx,
+			repository.MarkSessionDocumentVerificationPendingParams{
+				ID:                 doc.ID,
+				VerificationNextAt: sql.NullTime{Time: nextAt, Valid: true},
+			},
+		); err != nil {
+			log.Printf("sign_complete: mark verification pending doc=%s: %v (non-fatal)", doc.ID, err)
+		}
 	}
 
 	// 10. Upload to client S3 and dispatch webhook asynchronously.

@@ -28,6 +28,22 @@ INSERT INTO signing_session_documents (
 )
 RETURNING *;
 
+-- name: CreateSigningSessionDocumentWithHash :one
+-- client-mode: хэш и метаданные пришли из /sign/initiate; статус сразу 'ready',
+-- фетчер для подсчёта хэша не нужен (PDF всё равно кэшируется при первом обращении).
+INSERT INTO signing_session_documents (
+    session_id, document_name, source_url, target_url, target_s3_key,
+    content_hash, hash_source,
+    source_s3_bucket, source_s3_key, source_content_type, source_size_bytes,
+    status
+) VALUES (
+    $1, $2, $3, $4, $5,
+    $6, 'client',
+    $7, $8, $9, $10,
+    'ready'
+)
+RETURNING *;
+
 -- name: GetSigningSessionDocument :one
 SELECT * FROM signing_session_documents
 WHERE id = $1;
@@ -49,8 +65,27 @@ WHERE id = $1
 RETURNING *;
 
 -- name: UpdateSessionDocumentAfterFetch :one
+-- legacy: пишет content_hash из посчитанного фетчером значения.
 UPDATE signing_session_documents
 SET content_hash = $2, cached_s3_key = $3, status = 'ready'
+WHERE id = $1
+RETURNING *;
+
+-- name: UpdateSessionDocumentAfterFetchKeepHash :one
+-- client-mode: hash уже записан, фетчер только кэширует PDF.
+UPDATE signing_session_documents
+SET cached_s3_key = $2, status = 'ready'
+WHERE id = $1
+RETURNING *;
+
+-- name: MarkSessionDocumentTampered :one
+-- client-mode + sanity-check провалился: реально посчитанный SHA не совпал
+-- с клиентским hash. Документ окончательно отбракован.
+UPDATE signing_session_documents
+SET status = 'fetch_failed',
+    verification_status = 'mismatch',
+    verification_error = $2,
+    verification_checked_at = now()
 WHERE id = $1
 RETURNING *;
 
@@ -99,3 +134,51 @@ WHERE ssd.status = 'pending'
   AND ss.expires_at > now()
 ORDER BY ssd.created_at
 LIMIT 20;
+
+-- name: MarkSessionDocumentVerificationPending :exec
+-- Вызывается из /sign/complete после успешной sync-сверки messageDigest.
+-- Первая проверка асинхронным воркером откладывается на InitialDelay секунд.
+UPDATE signing_session_documents
+SET verification_status = 'pending',
+    verification_next_at = $2
+WHERE id = $1;
+
+-- name: ListDocumentsForVerification :many
+-- Воркер берёт пачку документов, готовых к проверке. SKIP LOCKED — для безопасной
+-- работы нескольких инстансов воркера одновременно.
+SELECT * FROM signing_session_documents
+WHERE verification_status IN ('pending', 'retrying')
+  AND verification_next_at <= now()
+ORDER BY verification_next_at
+LIMIT $1
+FOR UPDATE SKIP LOCKED;
+
+-- name: UpdateDocumentVerification :exec
+-- Финальная или промежуточная запись результата проверки. attempts инкрементируется
+-- атомарно. error/source_meta_hash могут быть NULL.
+UPDATE signing_session_documents
+SET verification_status = $2,
+    verification_checked_at = now(),
+    verification_attempts = verification_attempts + 1,
+    verification_error = $3,
+    verification_next_at = $4,
+    source_meta_hash = COALESCE($5, source_meta_hash)
+WHERE id = $1;
+
+-- name: RecalcSessionVerification :exec
+-- Worst-of агрегат: любой не-'verified' документ перетягивает статус сессии.
+-- Приоритет: mismatch > unavailable > pending > verified. Сессии без verification-
+-- атрибутов у документов не трогаем.
+UPDATE signing_sessions s
+SET verification_status = (
+    SELECT CASE
+        WHEN bool_or(ssd.verification_status = 'mismatch')       THEN 'mismatch'
+        WHEN bool_or(ssd.verification_status = 'unavailable')    THEN 'unavailable'
+        WHEN bool_or(ssd.verification_status IN ('pending','retrying')) THEN 'pending'
+        WHEN bool_and(ssd.verification_status = 'verified')      THEN 'verified'
+        ELSE NULL
+    END
+    FROM signing_session_documents ssd
+    WHERE ssd.session_id = s.id
+)
+WHERE s.id = $1;

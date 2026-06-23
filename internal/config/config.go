@@ -33,6 +33,14 @@ type StorageConfig struct {
 	AccessKey    string `mapstructure:"access_key"`
 	SecretKey    string `mapstructure:"secret_key"`
 	UsePathStyle bool   `mapstructure:"use_path_style"`
+
+	// Source-S3 — внешний бакет клиента (Lovable), где лежат исходные PDF.
+	// Если поля пустые — используется основной клиент (один бакет на всё).
+	SourceEndpoint     string `mapstructure:"source_endpoint"`
+	SourceRegion       string `mapstructure:"source_region"`
+	SourceAccessKey    string `mapstructure:"source_access_key"`
+	SourceSecretKey    string `mapstructure:"source_secret_key"`
+	SourceUsePathStyle bool   `mapstructure:"source_use_path_style"`
 }
 
 type RedisConfig struct {
@@ -81,6 +89,23 @@ type SigningConfig struct {
 	CMSBucket                 string `mapstructure:"cms_bucket"`
 }
 
+type VerificationConfig struct {
+	// Enabled включает фоновый verification-воркер. По умолчанию false — нужно
+	// включать явно через PKI_VERIFICATION_ENABLED=true (или yaml).
+	Enabled bool `mapstructure:"enabled"`
+	// AllowedBuckets — whitelist S3-бакетов, к которым воркер может HEAD'ить.
+	// Список через запятую, ENV PKI_ALLOWED_S3_BUCKETS. Пустой → no whitelist.
+	AllowedBuckets []string `mapstructure:"allowed_buckets"`
+	// InitialDelaySec — задержка между signed_at и первой проверкой (по умолчанию 60).
+	InitialDelaySec int `mapstructure:"initial_delay_sec"`
+	// TickIntervalSec — период тика воркера (по умолчанию 5).
+	TickIntervalSec int `mapstructure:"tick_interval_sec"`
+	// BatchSize — макс. кол-во документов на тик (по умолчанию 50).
+	BatchSize int `mapstructure:"batch_size"`
+	// DeadlineHours — после signed_at + DeadlineHours воркер фиксирует unavailable (по умолчанию 24).
+	DeadlineHours int `mapstructure:"deadline_hours"`
+}
+
 type Config struct {
 	App          AppConfig          `mapstructure:"app"`
 	Database     DatabaseConfig     `mapstructure:"database"`
@@ -92,6 +117,7 @@ type Config struct {
 	RateLimit    RateLimitConfig    `mapstructure:"rate_limit"`
 	Applications ApplicationsConfig `mapstructure:"applications"`
 	Signing      SigningConfig      `mapstructure:"signing"`
+	Verification VerificationConfig `mapstructure:"verification"`
 }
 
 // Load reads configs/config.{env}.yaml. ENV variables override yaml values
@@ -118,5 +144,19 @@ func Load(env string) (*Config, error) {
 	if err := v.Unmarshal(&cfg); err != nil {
 		return nil, fmt.Errorf("config: unmarshal: %w", err)
 	}
+
+	// ENV PKI_ALLOWED_S3_BUCKETS=a,b,c приходит одной строкой —
+	// после Unmarshal будет [{"a,b,c"}]. Разворачиваем в нормальный slice.
+	if len(cfg.Verification.AllowedBuckets) == 1 &&
+		strings.Contains(cfg.Verification.AllowedBuckets[0], ",") {
+		parts := strings.Split(cfg.Verification.AllowedBuckets[0], ",")
+		cfg.Verification.AllowedBuckets = cfg.Verification.AllowedBuckets[:0]
+		for _, p := range parts {
+			if t := strings.TrimSpace(p); t != "" {
+				cfg.Verification.AllowedBuckets = append(cfg.Verification.AllowedBuckets, t)
+			}
+		}
+	}
+
 	return &cfg, nil
 }

@@ -25,10 +25,15 @@ type Querier interface {
 	CreateSignatureWithID(ctx context.Context, arg CreateSignatureWithIDParams) (Signature, error)
 	CreateSigningSession(ctx context.Context, arg CreateSigningSessionParams) (SigningSession, error)
 	CreateSigningSessionDocument(ctx context.Context, arg CreateSigningSessionDocumentParams) (SigningSessionDocument, error)
+	// client-mode: хэш и метаданные пришли из /sign/initiate; статус сразу 'ready',
+	// фетчер для подсчёта хэша не нужен (PDF всё равно кэшируется при первом обращении).
+	CreateSigningSessionDocumentWithHash(ctx context.Context, arg CreateSigningSessionDocumentWithHashParams) (SigningSessionDocument, error)
 	CreateTenant(ctx context.Context, arg CreateTenantParams) (Tenant, error)
 	CreateUser(ctx context.Context, arg CreateUserParams) (User, error)
+	CreateWebhook(ctx context.Context, arg CreateWebhookParams) (Webhook, error)
 	CreateWebhookDelivery(ctx context.Context, arg CreateWebhookDeliveryParams) (WebhookDelivery, error)
 	DeactivateAPIKey(ctx context.Context, arg DeactivateAPIKeyParams) error
+	DeactivateWebhook(ctx context.Context, arg DeactivateWebhookParams) error
 	DeleteAuthToken(ctx context.Context, tokenHash string) error
 	DeleteExpiredTokens(ctx context.Context) error
 	DeleteUser(ctx context.Context, id uuid.UUID) error
@@ -63,12 +68,27 @@ type Querier interface {
 	ListAPIKeysByTenant(ctx context.Context, tenantID uuid.UUID) ([]ApiKey, error)
 	ListActiveApplicationDocuments(ctx context.Context, arg ListActiveApplicationDocumentsParams) ([]ApplicationDocument, error)
 	ListApplicationDocuments(ctx context.Context, applicationID uuid.UUID) ([]ApplicationDocument, error)
+	// Воркер берёт пачку документов, готовых к проверке. SKIP LOCKED — для безопасной
+	// работы нескольких инстансов воркера одновременно.
+	ListDocumentsForVerification(ctx context.Context, limit int32) ([]SigningSessionDocument, error)
+	ListPendingWebhookDeliveries(ctx context.Context, limit int32) ([]WebhookDelivery, error)
 	ListReadySessionDocuments(ctx context.Context, sessionID uuid.UUID) ([]SigningSessionDocument, error)
 	ListSessionDocuments(ctx context.Context, sessionID uuid.UUID) ([]SigningSessionDocument, error)
 	ListTenantsWithKeyCount(ctx context.Context) ([]ListTenantsWithKeyCountRow, error)
 	ListUsers(ctx context.Context) ([]User, error)
+	ListWebhooksByTenant(ctx context.Context, tenantID uuid.UUID) ([]Webhook, error)
 	MarkApplicationDocumentUploaded(ctx context.Context, id uuid.UUID) (ApplicationDocument, error)
+	// client-mode + sanity-check провалился: реально посчитанный SHA не совпал
+	// с клиентским hash. Документ окончательно отбракован.
+	MarkSessionDocumentTampered(ctx context.Context, arg MarkSessionDocumentTamperedParams) (SigningSessionDocument, error)
 	MarkSessionDocumentUploaded(ctx context.Context, id uuid.UUID) (SigningSessionDocument, error)
+	// Вызывается из /sign/complete после успешной sync-сверки messageDigest.
+	// Первая проверка асинхронным воркером откладывается на InitialDelay секунд.
+	MarkSessionDocumentVerificationPending(ctx context.Context, arg MarkSessionDocumentVerificationPendingParams) error
+	// Worst-of агрегат: любой не-'verified' документ перетягивает статус сессии.
+	// Приоритет: mismatch > unavailable > pending > verified. Сессии без verification-
+	// атрибутов у документов не трогаем.
+	RecalcSessionVerification(ctx context.Context, id uuid.UUID) error
 	ResetSessionDocumentForRetry(ctx context.Context, arg ResetSessionDocumentForRetryParams) (SigningSessionDocument, error)
 	SupersedeApplicationDocument(ctx context.Context, arg SupersedeApplicationDocumentParams) (ApplicationDocument, error)
 	UpdateAPIKeyLastUsed(ctx context.Context, id uuid.UUID) error
@@ -77,8 +97,14 @@ type Querier interface {
 	UpdateApplicationDocumentTargetURL(ctx context.Context, arg UpdateApplicationDocumentTargetURLParams) (ApplicationDocument, error)
 	UpdateApplicationStatus(ctx context.Context, arg UpdateApplicationStatusParams) (Application, error)
 	UpdateDocumentStatus(ctx context.Context, arg UpdateDocumentStatusParams) (Document, error)
+	// Финальная или промежуточная запись результата проверки. attempts инкрементируется
+	// атомарно. error/source_meta_hash могут быть NULL.
+	UpdateDocumentVerification(ctx context.Context, arg UpdateDocumentVerificationParams) error
 	UpdateDocumentVersion(ctx context.Context, arg UpdateDocumentVersionParams) (Document, error)
+	// legacy: пишет content_hash из посчитанного фетчером значения.
 	UpdateSessionDocumentAfterFetch(ctx context.Context, arg UpdateSessionDocumentAfterFetchParams) (SigningSessionDocument, error)
+	// client-mode: hash уже записан, фетчер только кэширует PDF.
+	UpdateSessionDocumentAfterFetchKeepHash(ctx context.Context, arg UpdateSessionDocumentAfterFetchKeepHashParams) (SigningSessionDocument, error)
 	UpdateSessionDocumentAfterSign(ctx context.Context, arg UpdateSessionDocumentAfterSignParams) (SigningSessionDocument, error)
 	UpdateSessionDocumentStatus(ctx context.Context, arg UpdateSessionDocumentStatusParams) (SigningSessionDocument, error)
 	UpdateSessionDocumentTargetURL(ctx context.Context, arg UpdateSessionDocumentTargetURLParams) (SigningSessionDocument, error)

@@ -94,8 +94,15 @@ func main() {
 
 	extS3 := s3client.NewHTTPExternalS3Client()
 	appHandler := handler.NewApplicationHandler(queries, signSvc, extS3, store)
-	signInitiateHandler := handler.NewSignInitiateHandler(queries, extS3, store)
-	signCompleteHandler := handler.NewSignCompleteHandler(queries, ncClient, store, extS3)
+	signInitiateHandler := handler.NewSignInitiateHandler(queries, extS3, store, cfg.Verification.AllowedBuckets)
+	verInitialDelay := time.Duration(cfg.Verification.InitialDelaySec) * time.Second
+	if verInitialDelay <= 0 {
+		verInitialDelay = 60 * time.Second
+	}
+	signCompleteHandler := handler.NewSignCompleteHandler(
+		queries, ncClient, store, extS3,
+		cfg.Verification.Enabled, verInitialDelay,
+	)
 	signStatusHandler := handler.NewSignStatusHandler(queries, extS3, store)
 
 	// Workers.
@@ -138,6 +145,38 @@ func main() {
 	go webhookDispatcher.Run(workerCtx)
 	go sessionCleanup.Run(workerCtx)
 	go deliveryPoller.Run(workerCtx)
+
+	// Verification worker — внутренняя async-сверка x-amz-meta-sha256 ↔ content_hash.
+	// Source-S3 клиент: если source_* пуст в storage-конфиге, используем
+	// основной S3-клиент (предполагая один бакет/одну IAM-роль).
+	var sourceClient s3client.MetaHashFetcher
+	if cfg.Storage.SourceEndpoint != "" || cfg.Storage.SourceAccessKey != "" {
+		sc, err := s3client.NewSourceS3Client(s3client.SourceS3Config{
+			Endpoint:     cfg.Storage.SourceEndpoint,
+			Region:       cfg.Storage.SourceRegion,
+			AccessKey:    cfg.Storage.SourceAccessKey,
+			SecretKey:    cfg.Storage.SourceSecretKey,
+			UsePathStyle: cfg.Storage.SourceUsePathStyle,
+		})
+		if err != nil {
+			log.Fatalf("source s3 client: %v", err)
+		}
+		sourceClient = sc
+	} else {
+		sourceClient = store
+	}
+	verWorker := worker.NewVerificationWorker(worker.VerificationConfig{
+		TickInterval: time.Duration(cfg.Verification.TickIntervalSec) * time.Second,
+		BatchSize:    int32(cfg.Verification.BatchSize),
+		Deadline:     time.Duration(cfg.Verification.DeadlineHours) * time.Hour,
+	}, queries, sourceClient)
+	if cfg.Verification.Enabled {
+		go verWorker.Run(workerCtx)
+		log.Println("verification_worker: enabled")
+	} else {
+		log.Println("verification_worker: disabled (PKI_VERIFICATION_ENABLED=false)")
+	}
+
 	_ = cancelWorkers // called on shutdown below
 
 	r := chi.NewRouter()

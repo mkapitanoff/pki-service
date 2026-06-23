@@ -275,35 +275,47 @@ type Signature struct {
 }
 
 type SigningSession struct {
-	ID             uuid.UUID      `json:"id"`
-	TenantID       uuid.UUID      `json:"tenant_id"`
-	ApplicationID  sql.NullString `json:"application_id"`
-	SignerRole     string         `json:"signer_role"`
-	CallbackUrl    sql.NullString `json:"callback_url"`
-	CallbackSecret sql.NullString `json:"callback_secret"`
-	Status         string         `json:"status"`
-	ExpiresAt      time.Time      `json:"expires_at"`
-	CreatedAt      time.Time      `json:"created_at"`
-	UpdatedAt      time.Time      `json:"updated_at"`
+	ID                 uuid.UUID      `json:"id"`
+	TenantID           uuid.UUID      `json:"tenant_id"`
+	ApplicationID      sql.NullString `json:"application_id"`
+	SignerRole         string         `json:"signer_role"`
+	CallbackUrl        sql.NullString `json:"callback_url"`
+	CallbackSecret     sql.NullString `json:"callback_secret"`
+	Status             string         `json:"status"`
+	ExpiresAt          time.Time      `json:"expires_at"`
+	CreatedAt          time.Time      `json:"created_at"`
+	UpdatedAt          time.Time      `json:"updated_at"`
+	VerificationStatus sql.NullString `json:"verification_status"`
 }
 
 type SigningSessionDocument struct {
-	ID             uuid.UUID      `json:"id"`
-	SessionID      uuid.UUID      `json:"session_id"`
-	DocumentName   string         `json:"document_name"`
-	SourceUrl      string         `json:"source_url"`
-	TargetUrl      sql.NullString `json:"target_url"`
-	TargetS3Key    sql.NullString `json:"target_s3_key"`
-	ContentHash    string         `json:"content_hash"`
-	CachedS3Key    sql.NullString `json:"cached_s3_key"`
-	SignedS3Key    sql.NullString `json:"signed_s3_key"`
-	CmsS3Key       sql.NullString `json:"cms_s3_key"`
-	Status         string         `json:"status"`
-	LastError      sql.NullString `json:"last_error"`
-	UploadAttempts int32          `json:"upload_attempts"`
-	SignedAt       sql.NullTime   `json:"signed_at"`
-	UploadedAt     sql.NullTime   `json:"uploaded_at"`
-	CreatedAt      time.Time      `json:"created_at"`
+	ID                    uuid.UUID      `json:"id"`
+	SessionID             uuid.UUID      `json:"session_id"`
+	DocumentName          string         `json:"document_name"`
+	SourceUrl             string         `json:"source_url"`
+	TargetUrl             sql.NullString `json:"target_url"`
+	TargetS3Key           sql.NullString `json:"target_s3_key"`
+	ContentHash           sql.NullString `json:"content_hash"`
+	CachedS3Key           sql.NullString `json:"cached_s3_key"`
+	SignedS3Key           sql.NullString `json:"signed_s3_key"`
+	CmsS3Key              sql.NullString `json:"cms_s3_key"`
+	Status                string         `json:"status"`
+	LastError             sql.NullString `json:"last_error"`
+	UploadAttempts        int32          `json:"upload_attempts"`
+	SignedAt              sql.NullTime   `json:"signed_at"`
+	UploadedAt            sql.NullTime   `json:"uploaded_at"`
+	CreatedAt             time.Time      `json:"created_at"`
+	HashSource            string         `json:"hash_source"`
+	SourceS3Bucket        sql.NullString `json:"source_s3_bucket"`
+	SourceS3Key           sql.NullString `json:"source_s3_key"`
+	SourceContentType     sql.NullString `json:"source_content_type"`
+	SourceSizeBytes       sql.NullInt64  `json:"source_size_bytes"`
+	SourceMetaHash        sql.NullString `json:"source_meta_hash"`
+	VerificationStatus    sql.NullString `json:"verification_status"`
+	VerificationCheckedAt sql.NullTime   `json:"verification_checked_at"`
+	VerificationError     sql.NullString `json:"verification_error"`
+	VerificationAttempts  int32          `json:"verification_attempts"`
+	VerificationNextAt    sql.NullTime   `json:"verification_next_at"`
 }
 
 type Tenant struct {

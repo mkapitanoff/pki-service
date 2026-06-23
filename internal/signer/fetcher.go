@@ -47,10 +47,33 @@ func FetchAndCacheDocument(
 		return markFetchFailed(ctx, queries, doc, fmt.Errorf("store to MinIO: %w", err))
 	}
 
+	// client-mode: hash уже пришёл в /sign/initiate. Sanity-check: реально
+	// посчитанный SHA должен совпадать. Если нет — клиент мог подменить хэш
+	// или объект изменился между загрузкой и фетчем; помечаем mismatch и
+	// дальше не идём.
+	if doc.HashSource == "client" && doc.ContentHash.Valid {
+		if doc.ContentHash.String != hashHex {
+			_, _ = queries.MarkSessionDocumentTampered(ctx, repository.MarkSessionDocumentTamperedParams{
+				ID:                 doc.ID,
+				VerificationError:  sql.NullString{String: "client_hash_mismatch", Valid: true},
+			})
+			return fmt.Errorf("fetcher: client_hash_mismatch doc=%s: want=%s have=%s",
+				doc.ID, doc.ContentHash.String, hashHex)
+		}
+		if _, err := queries.UpdateSessionDocumentAfterFetchKeepHash(ctx, repository.UpdateSessionDocumentAfterFetchKeepHashParams{
+			ID:          doc.ID,
+			CachedS3Key: sql.NullString{String: cachedKey, Valid: true},
+		}); err != nil {
+			return fmt.Errorf("fetcher: update after fetch (keep hash) doc=%s: %w", doc.ID, err)
+		}
+		return nil
+	}
+
+	// computed-mode: фетчер сам выставляет content_hash.
 	if _, err := queries.UpdateSessionDocumentAfterFetch(ctx, repository.UpdateSessionDocumentAfterFetchParams{
-		ID:           doc.ID,
-		ContentHash:  hashHex,
-		CachedS3Key:  sql.NullString{String: cachedKey, Valid: true},
+		ID:          doc.ID,
+		ContentHash: sql.NullString{String: hashHex, Valid: true},
+		CachedS3Key: sql.NullString{String: cachedKey, Valid: true},
 	}); err != nil {
 		return fmt.Errorf("fetcher: update after fetch doc=%s: %w", doc.ID, err)
 	}

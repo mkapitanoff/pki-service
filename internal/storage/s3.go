@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"strings"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -145,6 +146,48 @@ func (s *S3Client) EnsureBuckets(ctx context.Context, buckets ...string) error {
 		log.Printf("storage: created bucket %q", bucket)
 	}
 	return nil
+}
+
+// HeadResult — нормализованный ответ HeadObject.
+type HeadResult struct {
+	Metadata    map[string]string // user metadata; ключи lower-case, без префикса x-amz-meta-
+	ContentType string
+	Size        int64
+	ETag        string
+}
+
+// HeadObject делает S3 HeadObject и возвращает user-metadata (без префикса
+// x-amz-meta-), content-type, размер и ETag. Если bucket пустой —
+// используется дефолтный bucket клиента.
+func (s *S3Client) HeadObject(ctx context.Context, bucket, key string) (HeadResult, error) {
+	if bucket == "" {
+		bucket = s.bucket
+	}
+	out, err := s.client.HeadObject(ctx, &s3.HeadObjectInput{
+		Bucket: aws.String(bucket),
+		Key:    aws.String(key),
+	})
+	if err != nil {
+		return HeadResult{}, fmt.Errorf("storage: head %s/%s: %w", bucket, key, err)
+	}
+	res := HeadResult{
+		Metadata: make(map[string]string, len(out.Metadata)),
+	}
+	for k, v := range out.Metadata {
+		// aws-sdk-go-v2 уже срезает префикс x-amz-meta-, но ключи могут быть
+		// смешанного регистра в зависимости от S3-имплементации.
+		res.Metadata[strings.ToLower(k)] = v
+	}
+	if out.ContentType != nil {
+		res.ContentType = *out.ContentType
+	}
+	if out.ContentLength != nil {
+		res.Size = *out.ContentLength
+	}
+	if out.ETag != nil {
+		res.ETag = *out.ETag
+	}
+	return res, nil
 }
 
 // PingBucket returns nil if the bucket exists and is accessible, an error otherwise.

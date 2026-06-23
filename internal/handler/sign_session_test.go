@@ -98,8 +98,8 @@ func signSessionRouter(
 	extS3 s3client.ExternalS3Client,
 ) http.Handler {
 	r := chi.NewRouter()
-	r.Post("/api/v1/sign/initiate", NewSignInitiateHandler(q, extS3, store).HandleInitiate)
-	r.Post("/api/v1/sign/complete", NewSignCompleteHandler(q, nc, store, extS3).HandleComplete)
+	r.Post("/api/v1/sign/initiate", NewSignInitiateHandler(q, extS3, store, nil).HandleInitiate)
+	r.Post("/api/v1/sign/complete", NewSignCompleteHandler(q, nc, store, extS3, false, 0).HandleComplete)
 	r.Get("/api/v1/sign/status/{session_id}", NewSignStatusHandler(q, extS3, store).HandleGetStatus)
 	r.Patch("/api/v1/sign/refresh-urls", NewSignStatusHandler(q, extS3, store).HandleRefreshURLs)
 	return r
