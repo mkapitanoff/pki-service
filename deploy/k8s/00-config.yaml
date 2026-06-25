@@ -1,0 +1,116 @@
+# ConfigMap с прод-конфигом для k3s в namespace platform.
+# Этот файл монтируется в /app/configs/config.k8s.yaml; контейнер запускается
+# с APP_ENV=k8s, поэтому Viper читает именно эту версию.
+#
+# ВАЖНО: чувствительные значения (dsn с паролем, jwt_secret, S3 access/secret,
+# rabbitmq password) — пока ПРОПИСАНЫ ЗДЕСЬ как заглушки CHANGE_ME_*.
+# До перевода на BindEnv (отдельный мини-PR в коде) ConfigMap всё ещё
+# источник правды для всех настроек; Secret манифест приложен рядом, но
+# Deployment его НЕ читает, пока в Go-коде не появится явный BindEnv для
+# nested keys. После — переключим envFrom на pki-secrets и значения уберём
+# из ConfigMap.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: pki-api-config
+  namespace: platform
+data:
+  config.k8s.yaml: |
+    app:
+      env: k8s
+      port: 8080
+      verify_base_url: "https://pki.fin4b.kz"
+      jwt_secret: "CHANGE_ME_USE_STRONG_SECRET_32CHARS"
+      cors_origins: "*"
+
+    database:
+      dsn: "postgres://pki:CHANGE_ME_PG_PASS@postgres.platform.svc:5432/eds_prod?sslmode=disable"
+      max_open_conns: 10
+      max_idle_conns: 5
+      conn_max_lifetime_sec: 300
+
+    ncanode:
+      url: "http://ncanode.platform.svc:14579"
+      timeout_sec: 30
+
+    storage:
+      endpoint: "http://minio.platform.svc:9000"
+      region: "us-east-1"
+      bucket: "eds-prod"
+      access_key: "CHANGE_ME_MINIO_ACCESS"
+      secret_key: "CHANGE_ME_MINIO_SECRET"
+      use_path_style: true
+
+    redis:
+      addr: "redis.platform.svc:6379"
+      password: ""
+      db: 0
+
+    rabbitmq:
+      url: "amqp://pki:CHANGE_ME_RMQ_PASS@rabbitmq.platform.svc:5672/"
+      webhook_queue: "webhook.delivery"
+      event_exchange: "eds.events"
+      prefetch_count: 5
+
+    log:
+      level: "info"
+      format: "json"
+
+    rate_limit:
+      verify_per_minute: 60
+      api_per_minute: 300
+
+    applications:
+      fetch_interval_sec: 10
+      fetch_batch_size: 20
+      max_fetch_retries: 3
+      webhook_interval_sec: 5
+      webhook_max_attempts: 5
+
+    signing:
+      session_ttl_sec: 7200
+      fetch_timeout_sec: 55
+      upload_max_attempts: 5
+      upload_backoff_initial_sec: 5
+      upload_backoff_multiplier: 2
+      webhook_timeout_sec: 15
+      webhook_max_attempts: 5
+      cleanup_interval_sec: 600
+      cache_ttl_sec: 86400
+      cache_bucket: "pki-cache"
+      signed_bucket: "pki-signed"
+      cms_bucket: "pki-cms"
+
+    verification:
+      enabled: false
+      allowed_buckets: []
+      initial_delay_sec: 60
+      tick_interval_sec: 5
+      batch_size: 50
+      deadline_hours: 24
+---
+# Шаблон Secret для будущего перевода на envFrom (после добавления BindEnv в Go).
+# Сейчас НЕ используется Deployment'ом; создаётся отдельно из Vaultwarden:
+#   kubectl -n platform create secret generic pki-secrets \
+#     --from-literal=DATABASE_DSN='postgres://...' \
+#     --from-literal=APP_JWT_SECRET='...' \
+#     --from-literal=STORAGE_ACCESS_KEY='...' \
+#     --from-literal=STORAGE_SECRET_KEY='...' \
+#     --from-literal=RABBITMQ_URL='amqp://...' \
+#     --from-literal=REDIS_PASSWORD='...'
+# Этот файл — справочный, кладём в репо БЕЗ значений.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: pki-secrets
+  namespace: platform
+  annotations:
+    description: "placeholder — реальные значения через kubectl create secret из Vaultwarden (PKI-9)"
+type: Opaque
+stringData:
+  DATABASE_DSN: "REPLACE_VIA_KUBECTL_CREATE_SECRET"
+  APP_JWT_SECRET: "REPLACE_VIA_KUBECTL_CREATE_SECRET"
+  STORAGE_ACCESS_KEY: "REPLACE_VIA_KUBECTL_CREATE_SECRET"
+  STORAGE_SECRET_KEY: "REPLACE_VIA_KUBECTL_CREATE_SECRET"
+  RABBITMQ_URL: "REPLACE_VIA_KUBECTL_CREATE_SECRET"
+  REDIS_PASSWORD: "REPLACE_VIA_KUBECTL_CREATE_SECRET"

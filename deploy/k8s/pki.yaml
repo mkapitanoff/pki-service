@@ -1,0 +1,101 @@
+# PKI Service в k3s, namespace platform. Деплой по шаблону core/iam.
+#
+# Зависимости (по PKI-10, отдельный спринт): postgres.platform.svc:5432,
+# redis.platform.svc:6379, rabbitmq.platform.svc:5672, minio.platform.svc:9000,
+# ncanode.platform.svc:14579. Пока их нет — pod уйдёт в CrashLoopBackOff
+# на старте; это ожидаемо.
+#
+# Образ импортируется локально в k3s containerd (см. PKI-7):
+#   docker save → scp pki-deploy@10.207.22.13 → sudo k3s ctr images import.
+# В PROD/CI будет registry.gitlab.fin4b.kz/core/pki:<sha>, тогда уберём
+# imagePullPolicy: Never.
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pki-api
+  namespace: platform
+  labels: { app: pki-api, app.kubernetes.io/part-of: pki }
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: pki-api }
+  template:
+    metadata:
+      labels: { app: pki-api }
+    spec:
+      containers:
+        - name: pki-api
+          image: docker.io/library/pki-api:latest
+          imagePullPolicy: Never
+          env:
+            # Включает чтение configs/config.k8s.yaml, который монтируется
+            # из ConfigMap pki-api-config (см. 00-config.yaml).
+            - { name: APP_ENV, value: "k8s" }
+            # PKI-Verification фиче-флаг (по умолчанию выключен; включаем
+            # после деплоя Lovable с server-side hash).
+            - { name: PKI_VERIFICATION_ENABLED, value: "false" }
+          ports:
+            - { name: http, containerPort: 8080 }
+          readinessProbe:
+            httpGet: { path: /health, port: 8080 }
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            failureThreshold: 6
+          livenessProbe:
+            httpGet: { path: /health, port: 8080 }
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            failureThreshold: 5
+          resources:
+            requests: { cpu: "100m", memory: "128Mi" }
+            limits:   { cpu: "500m", memory: "512Mi" }
+          volumeMounts:
+            - name: app-config
+              mountPath: /app/configs/config.k8s.yaml
+              subPath: config.k8s.yaml
+              readOnly: true
+            - name: app-docs
+              mountPath: /app/docs
+              readOnly: false
+      volumes:
+        - name: app-config
+          configMap:
+            name: pki-api-config
+        # docs/ нужны для эндпоинтов /api/docs и /api/docs/openapi.yaml
+        # (они уже скопированы в образ; emptyDir не нужен, оставляем
+        # директорию писабельной для возможного будущего hot-reload).
+        - name: app-docs
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: pki-api
+  namespace: platform
+  labels: { app: pki-api }
+spec:
+  selector: { app: pki-api }
+  ports:
+    - { name: http, port: 8080, targetPort: 8080 }
+---
+# Ingress для pki.fin4b.kz через встроенный Traefik k3s. TLS терминируется на
+# ICDC ALB (PKI-14), сюда трафик приходит уже HTTP. Соответственно — никаких
+# TLS-секций, только web entrypoint.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: pki-api
+  namespace: platform
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: web
+spec:
+  ingressClassName: traefik
+  rules:
+    - host: pki.fin4b.kz
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service: { name: pki-api, port: { number: 8080 } }

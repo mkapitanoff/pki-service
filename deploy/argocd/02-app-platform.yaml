@@ -1,0 +1,27 @@
+# Application "platform-pki": Argo CD синхронизирует deploy/k8s/ из core/pki.git → ns platform.
+# Применять ПОСЛЕ создания repo secret (01-repo-secret.yaml).
+#
+#   kubectl apply -f deploy/argocd/02-app-platform.yaml
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: platform-pki
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://gitlab.fin4b.kz/core/pki.git
+    targetRevision: main
+    path: deploy/k8s
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: platform
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
