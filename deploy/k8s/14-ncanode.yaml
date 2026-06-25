@@ -28,11 +28,17 @@ spec:
     metadata:
       labels: { app: ncanode }
     spec:
+      # k8s service-link env (NCANODE_PORT=tcp://...) ломает Spring Boot,
+      # который читает свой NCANODE_PORT как server.port (Integer).
+      enableServiceLinks: false
       containers:
         - name: ncanode
           image: malikzh/ncanode:latest
           imagePullPolicy: IfNotPresent
           env:
+            # Явно фиксируем порт сервера NCANode — иначе Spring читает Service
+            # link NCANODE_PORT (URL) и крашится с NumberFormatException.
+            - { name: NCANODE_PORT,    value: "14579" }
             - { name: NCANODE_DEBUG,   value: "false" }
             - { name: NCANODE_OCSP_URL, value: "http://ocsp.pki.gov.kz/" }
             - { name: NCANODE_TSP_URL,  value: "http://tsp.pki.gov.kz/" }
