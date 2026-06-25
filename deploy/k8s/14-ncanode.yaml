@@ -1,0 +1,55 @@
+# NCANode 3 — sidecar для CMS/OCSP/TSP. Stateless с локальным кэшем CA
+# (заполняется при первом старте по NCANODE_CA_URL). PVC не нужен —
+# emptyDir сойдёт; при рестарте CA-bundle докачается заново.
+#
+# Параметры из CLAUDE.md PROD-контура (НУЦ РК).
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ncanode
+  namespace: platform
+  labels: { app: ncanode }
+spec:
+  selector: { app: ncanode }
+  ports:
+    - { name: http, port: 14579, targetPort: 14579 }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ncanode
+  namespace: platform
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: ncanode }
+  template:
+    metadata:
+      labels: { app: ncanode }
+    spec:
+      containers:
+        - name: ncanode
+          image: malikzh/ncanode:latest
+          imagePullPolicy: IfNotPresent
+          env:
+            - { name: NCANODE_DEBUG,   value: "false" }
+            - { name: NCANODE_OCSP_URL, value: "http://ocsp.pki.gov.kz/" }
+            - { name: NCANODE_TSP_URL,  value: "http://tsp.pki.gov.kz/" }
+            - { name: NCANODE_CRL_URL,  value: "http://crl.pki.gov.kz/nca_rsa.crl http://crl.pki.gov.kz/nca_gost2022.crl" }
+            - { name: NCANODE_CA_URL,   value: "http://pki.gov.kz/cert/root_gost2022.cer http://pki.gov.kz/cert/root_rsa.cer" }
+          ports:
+            - { name: http, containerPort: 14579 }
+          readinessProbe:
+            tcpSocket: { port: 14579 }
+            initialDelaySeconds: 30
+            periodSeconds: 15
+            failureThreshold: 6
+          resources:
+            requests: { cpu: "100m", memory: "256Mi" }
+            limits:   { cpu: "1",    memory: "768Mi" }
+          volumeMounts:
+            - { name: cache, mountPath: /app/cache }
+      volumes:
+        - name: cache
+          emptyDir: {}

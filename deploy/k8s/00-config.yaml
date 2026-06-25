@@ -2,13 +2,15 @@
 # Этот файл монтируется в /app/configs/config.k8s.yaml; контейнер запускается
 # с APP_ENV=k8s, поэтому Viper читает именно эту версию.
 #
-# ВАЖНО: чувствительные значения (dsn с паролем, jwt_secret, S3 access/secret,
-# rabbitmq password) — пока ПРОПИСАНЫ ЗДЕСЬ как заглушки CHANGE_ME_*.
-# До перевода на BindEnv (отдельный мини-PR в коде) ConfigMap всё ещё
-# источник правды для всех настроек; Secret манифест приложен рядом, но
-# Deployment его НЕ читает, пока в Go-коде не появится явный BindEnv для
-# nested keys. После — переключим envFrom на pki-secrets и значения уберём
-# из ConfigMap.
+# !!! ВАЖНО !!! Чувствительные значения (DSN с паролем, jwt_secret, S3 keys,
+# rabbitmq creds) подставляются init-скриптом деплоя через sed-rendering
+# из k8s Secret'ов postgres/redis/rabbitmq/minio-secrets перед apply. В git
+# хранятся плейсхолдеры __PG_PASS__, __REDIS_PASS__, __RMQ_PASS__,
+# __MINIO_ACCESS__, __MINIO_SECRET__, __JWT_SECRET__.
+#
+# До перевода Go-кода на BindEnv (отдельный мини-PR в config.go) ConfigMap
+# остаётся источником правды по чувствительным значениям — это компромисс
+# lift-and-shift. Шаблон Secret pki-secrets ниже — для будущего envFrom.
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -20,11 +22,11 @@ data:
       env: k8s
       port: 8080
       verify_base_url: "https://pki.fin4b.kz"
-      jwt_secret: "CHANGE_ME_USE_STRONG_SECRET_32CHARS"
+      jwt_secret: "__JWT_SECRET__"
       cors_origins: "*"
 
     database:
-      dsn: "postgres://pki:CHANGE_ME_PG_PASS@postgres.platform.svc:5432/eds_prod?sslmode=disable"
+      dsn: "postgres://pki:__PG_PASS__@postgres.platform.svc:5432/eds_prod?sslmode=disable"
       max_open_conns: 10
       max_idle_conns: 5
       conn_max_lifetime_sec: 300
@@ -37,17 +39,17 @@ data:
       endpoint: "http://minio.platform.svc:9000"
       region: "us-east-1"
       bucket: "eds-prod"
-      access_key: "CHANGE_ME_MINIO_ACCESS"
-      secret_key: "CHANGE_ME_MINIO_SECRET"
+      access_key: "__MINIO_ACCESS__"
+      secret_key: "__MINIO_SECRET__"
       use_path_style: true
 
     redis:
       addr: "redis.platform.svc:6379"
-      password: ""
+      password: "__REDIS_PASS__"
       db: 0
 
     rabbitmq:
-      url: "amqp://pki:CHANGE_ME_RMQ_PASS@rabbitmq.platform.svc:5672/"
+      url: "amqp://pki:__RMQ_PASS__@rabbitmq.platform.svc:5672/"
       webhook_queue: "webhook.delivery"
       event_exchange: "eds.events"
       prefetch_count: 5
