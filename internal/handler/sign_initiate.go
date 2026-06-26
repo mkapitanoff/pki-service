@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"net/url"
 	"strings"
@@ -16,6 +17,7 @@ import (
 
 	"github.com/lib/pq"
 
+	"github.com/mkapitanoff/pki-service/internal/reqctx"
 	"github.com/mkapitanoff/pki-service/internal/repository"
 	"github.com/mkapitanoff/pki-service/internal/s3client"
 	"github.com/mkapitanoff/pki-service/internal/signer"
@@ -155,6 +157,8 @@ func (h *SignInitiateHandler) HandleInitiate(w http.ResponseWriter, r *http.Requ
 
 	ctx := r.Context()
 
+	rid := reqctx.RequestID(ctx)
+
 	// 1. Create signing session (expires in 2 hours, default from DB).
 	session, err := h.queries.CreateSigningSession(ctx, repository.CreateSigningSessionParams{
 		TenantID:       tenantID,
@@ -165,9 +169,11 @@ func (h *SignInitiateHandler) HandleInitiate(w http.ResponseWriter, r *http.Requ
 		Column6:        nil, // use DB default: now() + 2h
 	})
 	if err != nil {
-		respondError(w, apperr.ErrInternal.WithCause(err))
+		respondErrorReq(w, r, apperr.ErrInternal.WithCause(err))
 		return
 	}
+	log.Printf("initiate.session_created request_id=%s tenant_id=%s session_id=%s application_id=%q documents=%d signer_role=%s",
+		rid, tenantID, session.ID, req.ApplicationID, len(req.Documents), req.SignerRole)
 
 	// 2. Create document records and collect IDs for fetching.
 	type docEntry struct {
@@ -180,6 +186,10 @@ func (h *SignInitiateHandler) HandleInitiate(w http.ResponseWriter, r *http.Requ
 			appDoc repository.SigningSessionDocument
 			cerr   error
 		)
+		// Lovable сопоставляет response.documents с request.documents по
+		// индексу. Сохраняем позицию в БД, чтобы ListSessionDocuments
+		// (ORDER BY client_index NULLS LAST) вернул их в исходном порядке.
+		clientIdx := sql.NullInt32{Int32: int32(i), Valid: true}
 		if clientHashHex[i] != "" {
 			appDoc, cerr = h.queries.CreateSigningSessionDocumentWithHash(ctx, repository.CreateSigningSessionDocumentWithHashParams{
 				SessionID:         session.ID,
@@ -192,6 +202,7 @@ func (h *SignInitiateHandler) HandleInitiate(w http.ResponseWriter, r *http.Requ
 				SourceS3Key:       toNullString(d.S3Key),
 				SourceContentType: toNullString(d.ContentType),
 				SourceSizeBytes:   sql.NullInt64{Int64: d.Size, Valid: d.Size > 0},
+				ClientIndex:       clientIdx,
 			})
 		} else {
 			appDoc, cerr = h.queries.CreateSigningSessionDocument(ctx, repository.CreateSigningSessionDocumentParams{
@@ -200,6 +211,7 @@ func (h *SignInitiateHandler) HandleInitiate(w http.ResponseWriter, r *http.Requ
 				SourceUrl:    d.SourceURL,
 				TargetUrl:    toNullString(d.TargetURL),
 				TargetS3Key:  toNullString(d.TargetS3Key),
+				ClientIndex:  clientIdx,
 			})
 		}
 		if cerr != nil {
@@ -268,18 +280,23 @@ func (h *SignInitiateHandler) HandleInitiate(w http.ResponseWriter, r *http.Requ
 
 	// 6. All documents failed → 502.
 	if allFailed {
-		respondJSON(w, http.StatusBadGateway, map[string]any{
+		log.Printf("initiate.failed request_id=%s session_id=%s reason=all_documents_failed_to_fetch",
+			rid, session.ID)
+		respondJSONReq(w, r, http.StatusBadGateway, map[string]any{
 			"error": map[string]any{
-				"code":      "FETCH_FAILED",
-				"message":   "all documents failed to fetch from provided URLs",
-				"documents": respDocs,
+				"code":       "FETCH_FAILED",
+				"message":    "all documents failed to fetch from provided URLs",
+				"request_id": rid,
+				"documents":  respDocs,
 			},
 		})
 		return
 	}
 
 	// 7. Success response.
-	respondJSON(w, http.StatusOK, map[string]any{
+	log.Printf("initiate.success request_id=%s session_id=%s documents_ready=%d expires_at=%s",
+		rid, session.ID, len(respDocs), session.ExpiresAt.UTC().Format(time.RFC3339))
+	respondJSONReq(w, r, http.StatusOK, map[string]any{
 		"session_id": session.ID.String(),
 		"expires_at": session.ExpiresAt.UTC().Format(time.RFC3339),
 		"documents":  respDocs,

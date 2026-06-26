@@ -17,6 +17,7 @@ import (
 	"github.com/google/uuid"
 
 	apperr "github.com/mkapitanoff/pki-service/internal/errors"
+	"github.com/mkapitanoff/pki-service/internal/reqctx"
 	"github.com/mkapitanoff/pki-service/internal/repository"
 )
 
@@ -25,15 +26,12 @@ import (
 // read tenantFromCtx keep working.
 const tenantRecordKey ctxKey = "tenant_record"
 
-// requestIDKey carries the per-request correlation ID through context.
-const requestIDKey ctxKey = "request_id"
-
 // RequestIDHeader is the HTTP header used for inbound/outbound correlation.
 const RequestIDHeader = "X-Request-Id"
 
 // RequestIDMiddleware accepts an inbound X-Request-Id or generates one,
-// stores it in the request context, mirrors it back in the response header,
-// so the caller (Lovable Edge) can correlate logs across systems.
+// stores it in the request context (см. reqctx), mirrors it back in the
+// response header, чтобы Lovable Edge мог сопоставлять логи между системами.
 func RequestIDMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		rid := strings.TrimSpace(r.Header.Get(RequestIDHeader))
@@ -41,17 +39,13 @@ func RequestIDMiddleware(next http.Handler) http.Handler {
 			rid = uuid.NewString()
 		}
 		w.Header().Set(RequestIDHeader, rid)
-		ctx := context.WithValue(r.Context(), requestIDKey, rid)
-		next.ServeHTTP(w, r.WithContext(ctx))
+		next.ServeHTTP(w, r.WithContext(reqctx.WithRequestID(r.Context(), rid)))
 	})
 }
 
 // RequestIDFromCtx returns the request ID set by RequestIDMiddleware, or "".
 func RequestIDFromCtx(ctx context.Context) string {
-	if v, ok := ctx.Value(requestIDKey).(string); ok {
-		return v
-	}
-	return ""
+	return reqctx.RequestID(ctx)
 }
 
 // JSONRecover catches panics inside handlers and returns a structured JSON

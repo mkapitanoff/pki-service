@@ -19,6 +19,7 @@ import (
 	"github.com/mkapitanoff/pki-service/internal/ncanode"
 	"github.com/mkapitanoff/pki-service/internal/pdf"
 	"github.com/mkapitanoff/pki-service/internal/qr"
+	"github.com/mkapitanoff/pki-service/internal/reqctx"
 	"github.com/mkapitanoff/pki-service/internal/repository"
 	"github.com/mkapitanoff/pki-service/internal/s3client"
 	"github.com/mkapitanoff/pki-service/internal/signer"
@@ -80,27 +81,30 @@ type completeDocResponse struct {
 func (h *SignCompleteHandler) HandleComplete(w http.ResponseWriter, r *http.Request) {
 	tenantID, ok := tenantFromCtx(r)
 	if !ok {
-		respondError(w, apperr.ErrUnauthorized)
+		respondErrorReq(w, r, apperr.ErrUnauthorized)
 		return
 	}
 
 	var req completeRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		respondError(w, apperr.ErrInvalidRequest)
+		respondErrorReq(w, r, apperr.ErrInvalidRequest)
 		return
 	}
 
 	sessionID, err := uuid.Parse(req.SessionID)
 	if err != nil {
-		respondError(w, apperr.ErrInvalidRequest.WithCause(fmt.Errorf("invalid session_id: %w", err)))
+		respondErrorReq(w, r, apperr.ErrInvalidRequest.WithCause(fmt.Errorf("invalid session_id: %w", err)))
 		return
 	}
 	if len(req.Signatures) == 0 {
-		respondError(w, apperr.ErrInvalidRequest.WithCause(fmt.Errorf("signatures must not be empty")))
+		respondErrorReq(w, r, apperr.ErrInvalidRequest.WithCause(fmt.Errorf("signatures must not be empty")))
 		return
 	}
 
 	ctx := r.Context()
+	rid := reqctx.RequestID(ctx)
+	log.Printf("complete.start request_id=%s tenant_id=%s session_id=%s signatures=%d",
+		rid, tenantID, sessionID, len(req.Signatures))
 
 	// Load and validate session.
 	session, err := h.queries.GetSigningSession(ctx, repository.GetSigningSessionParams{
@@ -166,7 +170,9 @@ func (h *SignCompleteHandler) HandleComplete(w http.ResponseWriter, r *http.Requ
 		results = append(results, *res)
 	}
 
-	respondJSON(w, http.StatusOK, map[string]any{
+	log.Printf("complete.done request_id=%s session_id=%s succeeded=%d failed=%d",
+		rid, sessionID, succeeded, failed)
+	respondJSONReq(w, r, http.StatusOK, map[string]any{
 		"succeeded": succeeded,
 		"failed":    failed,
 		"documents": results,

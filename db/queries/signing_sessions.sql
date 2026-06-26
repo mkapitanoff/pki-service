@@ -22,9 +22,10 @@ RETURNING *;
 
 -- name: CreateSigningSessionDocument :one
 INSERT INTO signing_session_documents (
-    session_id, document_name, source_url, target_url, target_s3_key, content_hash, status
+    session_id, document_name, source_url, target_url, target_s3_key,
+    content_hash, status, client_index
 ) VALUES (
-    $1, $2, $3, $4, $5, '', 'pending'
+    $1, $2, $3, $4, $5, '', 'pending', $6
 )
 RETURNING *;
 
@@ -35,12 +36,12 @@ INSERT INTO signing_session_documents (
     session_id, document_name, source_url, target_url, target_s3_key,
     content_hash, hash_source,
     source_s3_bucket, source_s3_key, source_content_type, source_size_bytes,
-    status
+    status, client_index
 ) VALUES (
     $1, $2, $3, $4, $5,
     $6, 'client',
     $7, $8, $9, $10,
-    'ready'
+    'ready', $11
 )
 RETURNING *;
 
@@ -49,14 +50,17 @@ SELECT * FROM signing_session_documents
 WHERE id = $1;
 
 -- name: ListSessionDocuments :many
+-- Порядок гарантируется: сначала по client_index (если есть), затем по
+-- created_at (для legacy-сессий и tie-breaker). Lovable сопоставляет
+-- response.documents с request.documents по индексу.
 SELECT * FROM signing_session_documents
 WHERE session_id = $1
-ORDER BY created_at;
+ORDER BY client_index NULLS LAST, created_at;
 
 -- name: ListReadySessionDocuments :many
 SELECT * FROM signing_session_documents
 WHERE session_id = $1 AND status = 'ready'
-ORDER BY created_at;
+ORDER BY client_index NULLS LAST, created_at;
 
 -- name: UpdateSessionDocumentStatus :one
 UPDATE signing_session_documents

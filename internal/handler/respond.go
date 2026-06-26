@@ -9,6 +9,7 @@ import (
 	"net/http"
 
 	apperr "github.com/mkapitanoff/pki-service/internal/errors"
+	"github.com/mkapitanoff/pki-service/internal/reqctx"
 )
 
 func toNullString(s string) sql.NullString {
@@ -29,7 +30,7 @@ func respondJSON(w http.ResponseWriter, status int, body any) {
 // header (если он ещё не выставлен — например при прямом вызове без middleware).
 func respondJSONReq(w http.ResponseWriter, r *http.Request, status int, body any) {
 	if w.Header().Get(RequestIDHeader) == "" {
-		if rid := RequestIDFromCtx(r.Context()); rid != "" {
+		if rid := reqctx.RequestID(r.Context()); rid != "" {
 			w.Header().Set(RequestIDHeader, rid)
 		}
 	}
@@ -49,7 +50,7 @@ func respondErrorReq(w http.ResponseWriter, r *http.Request, err error) {
 }
 
 func respondErrorCtx(w http.ResponseWriter, ctx context.Context, err error) {
-	rid := RequestIDFromCtx(ctx)
+	rid := reqctx.RequestID(ctx)
 
 	// Распознаём http.MaxBytesError → 413 PAYLOAD_TOO_LARGE.
 	var mbe *http.MaxBytesError

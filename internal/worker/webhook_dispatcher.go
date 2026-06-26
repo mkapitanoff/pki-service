@@ -135,9 +135,14 @@ func (d *WebhookDispatcher) dispatch(ctx context.Context, hook repository.Applic
 		return
 	}
 	defer resp.Body.Close()
+	// Прочтём начало тела для диагностики (Lovable Edge возвращает HTML/JSON
+	// со своими ошибками — нужен снимок для расследования).
+	const snippetLimit = 512
+	bodySnippet, _ := io.ReadAll(io.LimitReader(resp.Body, snippetLimit))
 	io.Copy(io.Discard, resp.Body)
 
-	log.Printf("webhook_dispatcher: hook=%s event=%s → %d", hook.ID, hook.EventType, resp.StatusCode)
+	log.Printf("webhook_dispatcher.deliver hook=%s app=%s event=%s url=%s status=%d body=%q",
+		hook.ID, hook.ApplicationID, hook.EventType, callbackURL, resp.StatusCode, string(bodySnippet))
 
 	newAttempts := hook.Attempts + 1
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {

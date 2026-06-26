@@ -4,7 +4,9 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"log"
 
+	"github.com/mkapitanoff/pki-service/internal/reqctx"
 	"github.com/mkapitanoff/pki-service/internal/repository"
 	"github.com/mkapitanoff/pki-service/internal/s3client"
 	"github.com/mkapitanoff/pki-service/internal/storage"
@@ -22,6 +24,10 @@ func FetchAndCacheDocument(
 	store storage.Storage,
 	queries *repository.Queries,
 ) error {
+	rid := reqctx.RequestID(ctx)
+	log.Printf("fetch.start request_id=%s session_id=%s doc_id=%s name=%q hash_source=%s",
+		rid, doc.SessionID, doc.ID, doc.DocumentName, doc.HashSource)
+
 	// Mark as fetching so concurrent workers skip it.
 	if _, err := queries.UpdateSessionDocumentStatus(ctx, repository.UpdateSessionDocumentStatusParams{
 		ID:        doc.ID,
