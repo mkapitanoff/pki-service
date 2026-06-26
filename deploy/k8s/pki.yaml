@@ -55,18 +55,12 @@ spec:
               mountPath: /app/configs/config.k8s.yaml
               subPath: config.k8s.yaml
               readOnly: true
-            - name: app-docs
-              mountPath: /app/docs
-              readOnly: false
+            # docs/ из образа — НЕ перекрываем emptyDir'ом, иначе
+            # /api/docs и /api/docs/openapi.yaml вернут 404.
       volumes:
         - name: app-config
           configMap:
             name: pki-api-config
-        # docs/ нужны для эндпоинтов /api/docs и /api/docs/openapi.yaml
-        # (они уже скопированы в образ; emptyDir не нужен, оставляем
-        # директорию писабельной для возможного будущего hot-reload).
-        - name: app-docs
-          emptyDir: {}
 ---
 apiVersion: v1
 kind: Service
