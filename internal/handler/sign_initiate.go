@@ -6,12 +6,15 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/lib/pq"
 
 	"github.com/mkapitanoff/pki-service/internal/repository"
 	"github.com/mkapitanoff/pki-service/internal/s3client"
@@ -200,7 +203,17 @@ func (h *SignInitiateHandler) HandleInitiate(w http.ResponseWriter, r *http.Requ
 			})
 		}
 		if cerr != nil {
-			respondError(w, apperr.ErrInternal.WithCause(cerr))
+			// Дубликат documents[].name в рамках сессии → 409 с
+			// machine-readable details (PG unique_violation 23505 на
+			// idx_ssd_session_document_name).
+			if isUniqueDocNameViolation(cerr) {
+				respondErrorReq(w, r, apperr.ErrDuplicateName.WithDetails(map[string]any{
+					"name":  d.Name,
+					"index": i,
+				}))
+				return
+			}
+			respondErrorReq(w, r, apperr.ErrInternal.WithCause(cerr))
 			return
 		}
 		entries = append(entries, docEntry{appDoc: appDoc, input: d})
@@ -300,6 +313,22 @@ func parseClientHash(b64, algo string) (string, error) {
 		return "", fmt.Errorf("invalid_hash: want 32 bytes, got %d", len(raw))
 	}
 	return hex.EncodeToString(raw), nil
+}
+
+// isUniqueDocNameViolation true, если err — PG unique_violation на индексе
+// idx_ssd_session_document_name (session_id, document_name). Используется
+// для маппинга на 409 DUPLICATE_DOCUMENT_NAME.
+func isUniqueDocNameViolation(err error) bool {
+	var pgErr *pq.Error
+	if !errors.As(err, &pgErr) {
+		return false
+	}
+	if pgErr.Code != "23505" {
+		return false
+	}
+	// Constraint имени может приехать как Constraint или как substring в Message.
+	return pgErr.Constraint == "idx_ssd_session_document_name" ||
+		strings.Contains(pgErr.Message, "idx_ssd_session_document_name")
 }
 
 // validateHTTPSURL checks that s is a non-empty, parseable HTTPS URL.

@@ -25,6 +25,83 @@ import (
 // read tenantFromCtx keep working.
 const tenantRecordKey ctxKey = "tenant_record"
 
+// requestIDKey carries the per-request correlation ID through context.
+const requestIDKey ctxKey = "request_id"
+
+// RequestIDHeader is the HTTP header used for inbound/outbound correlation.
+const RequestIDHeader = "X-Request-Id"
+
+// RequestIDMiddleware accepts an inbound X-Request-Id or generates one,
+// stores it in the request context, mirrors it back in the response header,
+// so the caller (Lovable Edge) can correlate logs across systems.
+func RequestIDMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		rid := strings.TrimSpace(r.Header.Get(RequestIDHeader))
+		if rid == "" {
+			rid = uuid.NewString()
+		}
+		w.Header().Set(RequestIDHeader, rid)
+		ctx := context.WithValue(r.Context(), requestIDKey, rid)
+		next.ServeHTTP(w, r.WithContext(ctx))
+	})
+}
+
+// RequestIDFromCtx returns the request ID set by RequestIDMiddleware, or "".
+func RequestIDFromCtx(ctx context.Context) string {
+	if v, ok := ctx.Value(requestIDKey).(string); ok {
+		return v
+	}
+	return ""
+}
+
+// JSONRecover catches panics inside handlers and returns a structured JSON
+// 500 instead of chi's default plain-text. Includes request_id for the caller.
+func JSONRecover(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer func() {
+			if rec := recover(); rec != nil {
+				rid := RequestIDFromCtx(r.Context())
+				// Log the panic with stack-equivalent context (request_id, path, method).
+				logPanic(rid, r.Method, r.URL.Path, rec)
+				// Best-effort: if headers already written, can't recover the body.
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusInternalServerError)
+				_, _ = w.Write([]byte(`{"error":{"code":"INTERNAL","message":"Internal server error","request_id":"` + rid + `"}}`))
+			}
+		}()
+		next.ServeHTTP(w, r)
+	})
+}
+
+func logPanic(rid, method, path string, rec any) {
+	// Use stdlib log via fmt; structured slog migration tracked in 1.6.
+	// nolint: forbidigo
+	println("PANIC request_id=" + rid + " " + method + " " + path + ": " + sprintAny(rec))
+}
+
+func sprintAny(v any) string {
+	if s, ok := v.(string); ok {
+		return s
+	}
+	if e, ok := v.(error); ok {
+		return e.Error()
+	}
+	return "<panic value not stringifiable>"
+}
+
+// MaxBytes wraps the handler and enforces a per-request body size limit.
+// Превышение приведёт к ошибке при попытке прочитать тело — handler сам
+// вернёт 413/400; чтобы быть гарантированным, decoder-у нужен MaxBytesReader
+// для отдачи правильного http.MaxBytesError.
+func MaxBytes(limit int64) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			r.Body = http.MaxBytesReader(w, r.Body, limit)
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
 func withTenantRecord(ctx context.Context, t repository.Tenant) context.Context {
 	return context.WithValue(ctx, tenantRecordKey, t)
 }

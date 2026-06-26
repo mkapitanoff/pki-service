@@ -199,9 +199,13 @@ func main() {
 		})
 	})
 
+	// RequestID должен быть ПЕРВЫМ, чтобы X-Request-Id попал и в логи
+	// middleware.Logger, и в JSON-ответы при panic'ах.
+	r.Use(handler.RequestIDMiddleware)
 	r.Use(middleware.Logger)
-	r.Use(middleware.Recoverer)
-	r.Use(middleware.RequestID)
+	// JSONRecover вместо chi middleware.Recoverer — отдаёт JSON 500
+	// вместо текста, чтобы Lovable Edge не парсил HTML на нашей стороне.
+	r.Use(handler.JSONRecover)
 
 	r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -301,18 +305,31 @@ func main() {
 		api.Get("/documents/{id}/sign-status", signHandler.HandleSignStatus)
 
 		// Production upload/download — paths avoid {id} wildcard conflict.
-		api.Post("/upload", documentHandler.HandleUploadDocument)
+		// Лимит body 50 MiB на multipart-upload PDF.
+		const uploadBodyLimit = 50 << 20  // 50 MiB
+		const jsonBodyLimit   = 1 << 20   // 1 MiB
+
+		api.Group(func(up chi.Router) {
+			up.Use(handler.MaxBytes(uploadBodyLimit))
+			up.Post("/upload", documentHandler.HandleUploadDocument)
+		})
 		api.Get("/documents/{id}/file", documentHandler.HandleDownloadDocument)
 
-		// Batch endpoints.
-		api.Post("/batch/upload", batchHandler.HandleBatchUpload)
+		// Batch endpoints — multipart с несколькими PDF.
+		api.Group(func(b chi.Router) {
+			b.Use(handler.MaxBytes(uploadBodyLimit))
+			b.Post("/batch/upload", batchHandler.HandleBatchUpload)
+		})
 		api.Post("/batch/sign", batchHandler.HandleBatchSign)
 
-		// Signing session endpoints.
-		api.Post("/sign/initiate", signInitiateHandler.HandleInitiate)
-		api.Post("/sign/complete", signCompleteHandler.HandleComplete)
+		// Signing session endpoints — чисто JSON, лимит 1 MiB.
+		api.Group(func(s chi.Router) {
+			s.Use(handler.MaxBytes(jsonBodyLimit))
+			s.Post("/sign/initiate", signInitiateHandler.HandleInitiate)
+			s.Post("/sign/complete", signCompleteHandler.HandleComplete)
+			s.Patch("/sign/refresh-urls", signStatusHandler.HandleRefreshURLs)
+		})
 		api.Get("/sign/status/{session_id}", signStatusHandler.HandleGetStatus)
-		api.Patch("/sign/refresh-urls", signStatusHandler.HandleRefreshURLs)
 
 		// Webhook subscription management.
 		api.Get("/webhooks", webhookHandler.HandleList)
