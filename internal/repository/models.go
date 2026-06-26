@@ -247,6 +247,18 @@ type DocumentVersion struct {
 	CreatedAt  time.Time `json:"created_at"`
 }
 
+type IdempotencyKey struct {
+	TenantID     uuid.UUID       `json:"tenant_id"`
+	IdemKey      string          `json:"idem_key"`
+	Method       string          `json:"method"`
+	Path         string          `json:"path"`
+	StatusCode   int32           `json:"status_code"`
+	ResponseBody json.RawMessage `json:"response_body"`
+	SessionID    uuid.NullUUID   `json:"session_id"`
+	CreatedAt    time.Time       `json:"created_at"`
+	ExpiresAt    time.Time       `json:"expires_at"`
+}
+
 type Signature struct {
 	ID            uuid.UUID      `json:"id"`
 	DocumentID    uuid.UUID      `json:"document_id"`

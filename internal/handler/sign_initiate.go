@@ -15,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/lib/pq"
 
 	"github.com/mkapitanoff/pki-service/internal/reqctx"
@@ -159,6 +160,22 @@ func (h *SignInitiateHandler) HandleInitiate(w http.ResponseWriter, r *http.Requ
 
 	rid := reqctx.RequestID(ctx)
 
+	// 0. Idempotency-Key check: если Lovable повторит /sign/initiate с тем
+	// же ключом (например после сетевого таймаута), отдаём кэшированный
+	// ответ и не создаём дубль сессии.
+	idemKey, cached, idemErr := CheckIdempotency(ctx, h.queries, r, tenantID)
+	if idemErr != nil {
+		log.Printf("initiate.idem.lookup_failed request_id=%s err=%v", rid, idemErr)
+		// Не прерываем flow — лучше создать сессию ещё раз, чем 5xx по
+		// инфра-ошибке БД на idempotency-таблице.
+	}
+	if cached != nil {
+		log.Printf("initiate.idem.replay request_id=%s tenant_id=%s key=%s status=%d",
+			rid, tenantID, idemKey, cached.StatusCode)
+		respondCached(w, r, cached)
+		return
+	}
+
 	// 1. Create signing session (expires in 2 hours, default from DB).
 	session, err := h.queries.CreateSigningSession(ctx, repository.CreateSigningSessionParams{
 		TenantID:       tenantID,
@@ -282,25 +299,35 @@ func (h *SignInitiateHandler) HandleInitiate(w http.ResponseWriter, r *http.Requ
 	if allFailed {
 		log.Printf("initiate.failed request_id=%s session_id=%s reason=all_documents_failed_to_fetch",
 			rid, session.ID)
-		respondJSONReq(w, r, http.StatusBadGateway, map[string]any{
+		body := map[string]any{
 			"error": map[string]any{
 				"code":       "FETCH_FAILED",
 				"message":    "all documents failed to fetch from provided URLs",
 				"request_id": rid,
 				"documents":  respDocs,
 			},
-		})
+		}
+		bodyBytes := jsonBytes(body)
+		StoreIdempotency(ctx, h.queries, r, tenantID, idemKey,
+			http.StatusBadGateway, bodyBytes,
+			uuid.NullUUID{UUID: session.ID, Valid: true})
+		respondJSONReq(w, r, http.StatusBadGateway, body)
 		return
 	}
 
 	// 7. Success response.
 	log.Printf("initiate.success request_id=%s session_id=%s documents_ready=%d expires_at=%s",
 		rid, session.ID, len(respDocs), session.ExpiresAt.UTC().Format(time.RFC3339))
-	respondJSONReq(w, r, http.StatusOK, map[string]any{
+	body := map[string]any{
 		"session_id": session.ID.String(),
 		"expires_at": session.ExpiresAt.UTC().Format(time.RFC3339),
 		"documents":  respDocs,
-	})
+	}
+	bodyBytes := jsonBytes(body)
+	StoreIdempotency(ctx, h.queries, r, tenantID, idemKey,
+		http.StatusOK, bodyBytes,
+		uuid.NullUUID{UUID: session.ID, Valid: true})
+	respondJSONReq(w, r, http.StatusOK, body)
 }
 
 // parseClientHash валидирует пришедший от Lovable base64-хэш и возвращает hex.

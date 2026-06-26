@@ -76,8 +76,14 @@ func (w *SessionCleanupWorker) Run(ctx context.Context) {
 	}
 }
 
-// cleanupExpired marks expired signing sessions and deletes their cached PDFs.
+// cleanupExpired marks expired signing sessions and deletes their cached PDFs,
+// плюс протирает экспайренные idempotency-ключи (TTL 24h).
 func (w *SessionCleanupWorker) cleanupExpired(ctx context.Context) {
+	// Idempotency keys — cheap DELETE, делаем всегда.
+	if err := w.queries.CleanupExpiredIdempotencyKeys(ctx); err != nil {
+		log.Printf("session_cleanup: cleanup idempotency keys: %v", err)
+	}
+
 	sessions, err := w.queries.GetExpiredSessions(ctx)
 	if err != nil {
 		log.Printf("session_cleanup: query expired sessions: %v", err)

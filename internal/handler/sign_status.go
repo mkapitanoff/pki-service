@@ -39,11 +39,56 @@ func NewSignStatusHandler(
 type sessionDocResponse struct {
 	DocID      string  `json:"doc_id"`
 	Name       string  `json:"name"`
+	// Status — внутреннее представление (back-compat для Lovable Edge).
 	Status     string  `json:"status"`
+	// State — нормализованный enum для интеграций:
+	// PENDING | FETCHING | READY | SIGNING | SIGNED | UPLOADING | UPLOADED | FAILED.
+	State      string  `json:"state"`
 	S3Key      string  `json:"s3_key,omitempty"`
 	SignedAt   *string `json:"signed_at,omitempty"`
 	UploadedAt *string `json:"uploaded_at,omitempty"`
 	Error      *string `json:"error"`
+	// ErrorCode — машинно-читаемый код ошибки документа, выводится при FAILED.
+	ErrorCode  string  `json:"error_code,omitempty"`
+}
+
+// docStateFromStatus маппит внутренний status в публичный enum для Lovable.
+func docStateFromStatus(s string) string {
+	switch s {
+	case "pending":
+		return "PENDING"
+	case "fetching":
+		return "FETCHING"
+	case "ready":
+		return "READY"
+	case "signing":
+		return "SIGNING"
+	case "signed":
+		return "SIGNED"
+	case "uploading":
+		return "UPLOADING"
+	case "uploaded":
+		return "UPLOADED"
+	case "fetch_failed", "upload_failed", "failed":
+		return "FAILED"
+	default:
+		return "PENDING"
+	}
+}
+
+// docErrorCodeFromStatus возвращает машинно-читаемый код ошибки для FAILED
+// статусов. Используется Lovable Edge для логики ретраев.
+func docErrorCodeFromStatus(status string) string {
+	switch status {
+	case "fetch_failed":
+		return "FETCH_FAILED"
+	case "upload_failed":
+		return "UPLOAD_FAILED"
+	case "failed":
+		return "SIGNING_FAILED"
+	default:
+		return ""
+	}
 }
 
 func (h *SignStatusHandler) HandleGetStatus(w http.ResponseWriter, r *http.Request) {
@@ -101,6 +146,7 @@ func (h *SignStatusHandler) HandleGetStatus(w http.ResponseWriter, r *http.Reque
 			DocID:  d.ID.String(),
 			Name:   d.DocumentName,
 			Status: d.Status,
+			State:  docStateFromStatus(d.Status),
 		}
 		if d.TargetS3Key.Valid {
 			rd.S3Key = d.TargetS3Key.String
@@ -116,6 +162,9 @@ func (h *SignStatusHandler) HandleGetStatus(w http.ResponseWriter, r *http.Reque
 		if d.LastError.Valid && d.LastError.String != "" {
 			s := d.LastError.String
 			rd.Error = &s
+		}
+		if rd.State == "FAILED" {
+			rd.ErrorCode = docErrorCodeFromStatus(d.Status)
 		}
 		docList = append(docList, rd)
 	}

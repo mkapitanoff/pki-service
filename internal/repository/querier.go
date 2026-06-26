@@ -13,6 +13,7 @@ import (
 
 type Querier interface {
 	CancelApplication(ctx context.Context, arg CancelApplicationParams) (Application, error)
+	CleanupExpiredIdempotencyKeys(ctx context.Context) error
 	CreateAPIKey(ctx context.Context, arg CreateAPIKeyParams) (ApiKey, error)
 	CreateApplication(ctx context.Context, arg CreateApplicationParams) (Application, error)
 	CreateApplicationDocument(ctx context.Context, arg CreateApplicationDocumentParams) (ApplicationDocument, error)
@@ -48,6 +49,9 @@ type Querier interface {
 	GetDocumentBySHA256(ctx context.Context, arg GetDocumentBySHA256Params) (Document, error)
 	GetDocumentCallbackURL(ctx context.Context, id uuid.UUID) (sql.NullString, error)
 	GetExpiredSessions(ctx context.Context) ([]SigningSession, error)
+	// Возвращает закэшированный response для (tenant, key, method, path) если
+	// он ещё не истёк. NULL → нужно обработать запрос обычным flow.
+	GetIdempotencyKey(ctx context.Context, arg GetIdempotencyKeyParams) (IdempotencyKey, error)
 	GetPendingFetchDocuments(ctx context.Context, limit int32) ([]ApplicationDocument, error)
 	GetPendingFetchSessionDocuments(ctx context.Context) ([]SigningSessionDocument, error)
 	GetPendingWebhooks(ctx context.Context) ([]ApplicationWebhook, error)
@@ -88,6 +92,10 @@ type Querier interface {
 	// Вызывается из /sign/complete после успешной sync-сверки messageDigest.
 	// Первая проверка асинхронным воркером откладывается на InitialDelay секунд.
 	MarkSessionDocumentVerificationPending(ctx context.Context, arg MarkSessionDocumentVerificationPendingParams) error
+	// Сохраняет результат обработки. ON CONFLICT DO NOTHING — если две
+	// параллельные транзакции дошли сюда, первая выигрывает; вторая запросом
+	// GetIdempotencyKey увидит её результат при ретрае.
+	PutIdempotencyKey(ctx context.Context, arg PutIdempotencyKeyParams) error
 	// Worst-of агрегат: любой не-'verified' документ перетягивает статус сессии.
 	// Приоритет: mismatch > unavailable > pending > verified. Сессии без verification-
 	// атрибутов у документов не трогаем.
