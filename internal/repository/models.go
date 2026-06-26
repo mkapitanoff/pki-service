@@ -316,6 +316,7 @@ type SigningSessionDocument struct {
 	VerificationError     sql.NullString `json:"verification_error"`
 	VerificationAttempts  int32          `json:"verification_attempts"`
 	VerificationNextAt    sql.NullTime   `json:"verification_next_at"`
+	ClientIndex           sql.NullInt32  `json:"client_index"`
 }
 
 type Tenant struct {

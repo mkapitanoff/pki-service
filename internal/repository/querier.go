@@ -73,6 +73,9 @@ type Querier interface {
 	ListDocumentsForVerification(ctx context.Context, limit int32) ([]SigningSessionDocument, error)
 	ListPendingWebhookDeliveries(ctx context.Context, limit int32) ([]WebhookDelivery, error)
 	ListReadySessionDocuments(ctx context.Context, sessionID uuid.UUID) ([]SigningSessionDocument, error)
+	// Порядок гарантируется: сначала по client_index (если есть), затем по
+	// created_at (для legacy-сессий и tie-breaker). Lovable сопоставляет
+	// response.documents с request.documents по индексу.
 	ListSessionDocuments(ctx context.Context, sessionID uuid.UUID) ([]SigningSessionDocument, error)
 	ListTenantsWithKeyCount(ctx context.Context) ([]ListTenantsWithKeyCountRow, error)
 	ListUsers(ctx context.Context) ([]User, error)
