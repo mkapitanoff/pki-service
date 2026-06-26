@@ -59,11 +59,11 @@ func (q *Queries) CreateSigningSession(ctx context.Context, arg CreateSigningSes
 const createSigningSessionDocument = `-- name: CreateSigningSessionDocument :one
 INSERT INTO signing_session_documents (
     session_id, document_name, source_url, target_url, target_s3_key,
-    content_hash, status, client_index
+    content_hash, status, client_index, client_ref
 ) VALUES (
-    $1, $2, $3, $4, $5, '', 'pending', $6
+    $1, $2, $3, $4, $5, '', 'pending', $6, $7
 )
-RETURNING id, session_id, document_name, source_url, target_url, target_s3_key, content_hash, cached_s3_key, signed_s3_key, cms_s3_key, status, last_error, upload_attempts, signed_at, uploaded_at, created_at, hash_source, source_s3_bucket, source_s3_key, source_content_type, source_size_bytes, source_meta_hash, verification_status, verification_checked_at, verification_error, verification_attempts, verification_next_at, client_index
+RETURNING id, session_id, document_name, source_url, target_url, target_s3_key, content_hash, cached_s3_key, signed_s3_key, cms_s3_key, status, last_error, upload_attempts, signed_at, uploaded_at, created_at, hash_source, source_s3_bucket, source_s3_key, source_content_type, source_size_bytes, source_meta_hash, verification_status, verification_checked_at, verification_error, verification_attempts, verification_next_at, client_index, client_ref
 `
 
 type CreateSigningSessionDocumentParams struct {
@@ -73,6 +73,7 @@ type CreateSigningSessionDocumentParams struct {
 	TargetUrl    sql.NullString `json:"target_url"`
 	TargetS3Key  sql.NullString `json:"target_s3_key"`
 	ClientIndex  sql.NullInt32  `json:"client_index"`
+	ClientRef    sql.NullString `json:"client_ref"`
 }
 
 func (q *Queries) CreateSigningSessionDocument(ctx context.Context, arg CreateSigningSessionDocumentParams) (SigningSessionDocument, error) {
@@ -83,6 +84,7 @@ func (q *Queries) CreateSigningSessionDocument(ctx context.Context, arg CreateSi
 		arg.TargetUrl,
 		arg.TargetS3Key,
 		arg.ClientIndex,
+		arg.ClientRef,
 	)
 	var i SigningSessionDocument
 	err := row.Scan(
@@ -114,6 +116,7 @@ func (q *Queries) CreateSigningSessionDocument(ctx context.Context, arg CreateSi
 		&i.VerificationAttempts,
 		&i.VerificationNextAt,
 		&i.ClientIndex,
+		&i.ClientRef,
 	)
 	return i, err
 }
@@ -123,14 +126,14 @@ INSERT INTO signing_session_documents (
     session_id, document_name, source_url, target_url, target_s3_key,
     content_hash, hash_source,
     source_s3_bucket, source_s3_key, source_content_type, source_size_bytes,
-    status, client_index
+    status, client_index, client_ref
 ) VALUES (
     $1, $2, $3, $4, $5,
     $6, 'client',
     $7, $8, $9, $10,
-    'ready', $11
+    'ready', $11, $12
 )
-RETURNING id, session_id, document_name, source_url, target_url, target_s3_key, content_hash, cached_s3_key, signed_s3_key, cms_s3_key, status, last_error, upload_attempts, signed_at, uploaded_at, created_at, hash_source, source_s3_bucket, source_s3_key, source_content_type, source_size_bytes, source_meta_hash, verification_status, verification_checked_at, verification_error, verification_attempts, verification_next_at, client_index
+RETURNING id, session_id, document_name, source_url, target_url, target_s3_key, content_hash, cached_s3_key, signed_s3_key, cms_s3_key, status, last_error, upload_attempts, signed_at, uploaded_at, created_at, hash_source, source_s3_bucket, source_s3_key, source_content_type, source_size_bytes, source_meta_hash, verification_status, verification_checked_at, verification_error, verification_attempts, verification_next_at, client_index, client_ref
 `
 
 type CreateSigningSessionDocumentWithHashParams struct {
@@ -145,6 +148,7 @@ type CreateSigningSessionDocumentWithHashParams struct {
 	SourceContentType sql.NullString `json:"source_content_type"`
 	SourceSizeBytes   sql.NullInt64  `json:"source_size_bytes"`
 	ClientIndex       sql.NullInt32  `json:"client_index"`
+	ClientRef         sql.NullString `json:"client_ref"`
 }
 
 // client-mode: хэш и метаданные пришли из /sign/initiate; статус сразу 'ready',
@@ -162,6 +166,7 @@ func (q *Queries) CreateSigningSessionDocumentWithHash(ctx context.Context, arg 
 		arg.SourceContentType,
 		arg.SourceSizeBytes,
 		arg.ClientIndex,
+		arg.ClientRef,
 	)
 	var i SigningSessionDocument
 	err := row.Scan(
@@ -193,6 +198,7 @@ func (q *Queries) CreateSigningSessionDocumentWithHash(ctx context.Context, arg 
 		&i.VerificationAttempts,
 		&i.VerificationNextAt,
 		&i.ClientIndex,
+		&i.ClientRef,
 	)
 	return i, err
 }
@@ -241,7 +247,7 @@ func (q *Queries) GetExpiredSessions(ctx context.Context) ([]SigningSession, err
 }
 
 const getPendingFetchSessionDocuments = `-- name: GetPendingFetchSessionDocuments :many
-SELECT ssd.id, ssd.session_id, ssd.document_name, ssd.source_url, ssd.target_url, ssd.target_s3_key, ssd.content_hash, ssd.cached_s3_key, ssd.signed_s3_key, ssd.cms_s3_key, ssd.status, ssd.last_error, ssd.upload_attempts, ssd.signed_at, ssd.uploaded_at, ssd.created_at, ssd.hash_source, ssd.source_s3_bucket, ssd.source_s3_key, ssd.source_content_type, ssd.source_size_bytes, ssd.source_meta_hash, ssd.verification_status, ssd.verification_checked_at, ssd.verification_error, ssd.verification_attempts, ssd.verification_next_at, ssd.client_index FROM signing_session_documents ssd
+SELECT ssd.id, ssd.session_id, ssd.document_name, ssd.source_url, ssd.target_url, ssd.target_s3_key, ssd.content_hash, ssd.cached_s3_key, ssd.signed_s3_key, ssd.cms_s3_key, ssd.status, ssd.last_error, ssd.upload_attempts, ssd.signed_at, ssd.uploaded_at, ssd.created_at, ssd.hash_source, ssd.source_s3_bucket, ssd.source_s3_key, ssd.source_content_type, ssd.source_size_bytes, ssd.source_meta_hash, ssd.verification_status, ssd.verification_checked_at, ssd.verification_error, ssd.verification_attempts, ssd.verification_next_at, ssd.client_index, ssd.client_ref FROM signing_session_documents ssd
 JOIN signing_sessions ss ON ss.id = ssd.session_id
 WHERE ssd.status = 'pending'
   AND ss.status NOT IN ('expired', 'failed', 'completed')
@@ -288,6 +294,7 @@ func (q *Queries) GetPendingFetchSessionDocuments(ctx context.Context) ([]Signin
 			&i.VerificationAttempts,
 			&i.VerificationNextAt,
 			&i.ClientIndex,
+			&i.ClientRef,
 		); err != nil {
 			return nil, err
 		}
@@ -356,7 +363,7 @@ func (q *Queries) GetSigningSessionByID(ctx context.Context, id uuid.UUID) (Sign
 }
 
 const getSigningSessionDocument = `-- name: GetSigningSessionDocument :one
-SELECT id, session_id, document_name, source_url, target_url, target_s3_key, content_hash, cached_s3_key, signed_s3_key, cms_s3_key, status, last_error, upload_attempts, signed_at, uploaded_at, created_at, hash_source, source_s3_bucket, source_s3_key, source_content_type, source_size_bytes, source_meta_hash, verification_status, verification_checked_at, verification_error, verification_attempts, verification_next_at, client_index FROM signing_session_documents
+SELECT id, session_id, document_name, source_url, target_url, target_s3_key, content_hash, cached_s3_key, signed_s3_key, cms_s3_key, status, last_error, upload_attempts, signed_at, uploaded_at, created_at, hash_source, source_s3_bucket, source_s3_key, source_content_type, source_size_bytes, source_meta_hash, verification_status, verification_checked_at, verification_error, verification_attempts, verification_next_at, client_index, client_ref FROM signing_session_documents
 WHERE id = $1
 `
 
@@ -392,6 +399,7 @@ func (q *Queries) GetSigningSessionDocument(ctx context.Context, id uuid.UUID) (
 		&i.VerificationAttempts,
 		&i.VerificationNextAt,
 		&i.ClientIndex,
+		&i.ClientRef,
 	)
 	return i, err
 }
@@ -400,7 +408,7 @@ const incrementSessionDocumentUploadAttempts = `-- name: IncrementSessionDocumen
 UPDATE signing_session_documents
 SET upload_attempts = upload_attempts + 1, last_error = $2
 WHERE id = $1
-RETURNING id, session_id, document_name, source_url, target_url, target_s3_key, content_hash, cached_s3_key, signed_s3_key, cms_s3_key, status, last_error, upload_attempts, signed_at, uploaded_at, created_at, hash_source, source_s3_bucket, source_s3_key, source_content_type, source_size_bytes, source_meta_hash, verification_status, verification_checked_at, verification_error, verification_attempts, verification_next_at, client_index
+RETURNING id, session_id, document_name, source_url, target_url, target_s3_key, content_hash, cached_s3_key, signed_s3_key, cms_s3_key, status, last_error, upload_attempts, signed_at, uploaded_at, created_at, hash_source, source_s3_bucket, source_s3_key, source_content_type, source_size_bytes, source_meta_hash, verification_status, verification_checked_at, verification_error, verification_attempts, verification_next_at, client_index, client_ref
 `
 
 type IncrementSessionDocumentUploadAttemptsParams struct {
@@ -440,12 +448,13 @@ func (q *Queries) IncrementSessionDocumentUploadAttempts(ctx context.Context, ar
 		&i.VerificationAttempts,
 		&i.VerificationNextAt,
 		&i.ClientIndex,
+		&i.ClientRef,
 	)
 	return i, err
 }
 
 const listDocumentsForVerification = `-- name: ListDocumentsForVerification :many
-SELECT id, session_id, document_name, source_url, target_url, target_s3_key, content_hash, cached_s3_key, signed_s3_key, cms_s3_key, status, last_error, upload_attempts, signed_at, uploaded_at, created_at, hash_source, source_s3_bucket, source_s3_key, source_content_type, source_size_bytes, source_meta_hash, verification_status, verification_checked_at, verification_error, verification_attempts, verification_next_at, client_index FROM signing_session_documents
+SELECT id, session_id, document_name, source_url, target_url, target_s3_key, content_hash, cached_s3_key, signed_s3_key, cms_s3_key, status, last_error, upload_attempts, signed_at, uploaded_at, created_at, hash_source, source_s3_bucket, source_s3_key, source_content_type, source_size_bytes, source_meta_hash, verification_status, verification_checked_at, verification_error, verification_attempts, verification_next_at, client_index, client_ref FROM signing_session_documents
 WHERE verification_status IN ('pending', 'retrying')
   AND verification_next_at <= now()
 ORDER BY verification_next_at
@@ -493,6 +502,7 @@ func (q *Queries) ListDocumentsForVerification(ctx context.Context, limit int32)
 			&i.VerificationAttempts,
 			&i.VerificationNextAt,
 			&i.ClientIndex,
+			&i.ClientRef,
 		); err != nil {
 			return nil, err
 		}
@@ -508,7 +518,7 @@ func (q *Queries) ListDocumentsForVerification(ctx context.Context, limit int32)
 }
 
 const listReadySessionDocuments = `-- name: ListReadySessionDocuments :many
-SELECT id, session_id, document_name, source_url, target_url, target_s3_key, content_hash, cached_s3_key, signed_s3_key, cms_s3_key, status, last_error, upload_attempts, signed_at, uploaded_at, created_at, hash_source, source_s3_bucket, source_s3_key, source_content_type, source_size_bytes, source_meta_hash, verification_status, verification_checked_at, verification_error, verification_attempts, verification_next_at, client_index FROM signing_session_documents
+SELECT id, session_id, document_name, source_url, target_url, target_s3_key, content_hash, cached_s3_key, signed_s3_key, cms_s3_key, status, last_error, upload_attempts, signed_at, uploaded_at, created_at, hash_source, source_s3_bucket, source_s3_key, source_content_type, source_size_bytes, source_meta_hash, verification_status, verification_checked_at, verification_error, verification_attempts, verification_next_at, client_index, client_ref FROM signing_session_documents
 WHERE session_id = $1 AND status = 'ready'
 ORDER BY client_index NULLS LAST, created_at
 `
@@ -551,6 +561,7 @@ func (q *Queries) ListReadySessionDocuments(ctx context.Context, sessionID uuid.
 			&i.VerificationAttempts,
 			&i.VerificationNextAt,
 			&i.ClientIndex,
+			&i.ClientRef,
 		); err != nil {
 			return nil, err
 		}
@@ -566,7 +577,7 @@ func (q *Queries) ListReadySessionDocuments(ctx context.Context, sessionID uuid.
 }
 
 const listSessionDocuments = `-- name: ListSessionDocuments :many
-SELECT id, session_id, document_name, source_url, target_url, target_s3_key, content_hash, cached_s3_key, signed_s3_key, cms_s3_key, status, last_error, upload_attempts, signed_at, uploaded_at, created_at, hash_source, source_s3_bucket, source_s3_key, source_content_type, source_size_bytes, source_meta_hash, verification_status, verification_checked_at, verification_error, verification_attempts, verification_next_at, client_index FROM signing_session_documents
+SELECT id, session_id, document_name, source_url, target_url, target_s3_key, content_hash, cached_s3_key, signed_s3_key, cms_s3_key, status, last_error, upload_attempts, signed_at, uploaded_at, created_at, hash_source, source_s3_bucket, source_s3_key, source_content_type, source_size_bytes, source_meta_hash, verification_status, verification_checked_at, verification_error, verification_attempts, verification_next_at, client_index, client_ref FROM signing_session_documents
 WHERE session_id = $1
 ORDER BY client_index NULLS LAST, created_at
 `
@@ -612,6 +623,7 @@ func (q *Queries) ListSessionDocuments(ctx context.Context, sessionID uuid.UUID)
 			&i.VerificationAttempts,
 			&i.VerificationNextAt,
 			&i.ClientIndex,
+			&i.ClientRef,
 		); err != nil {
 			return nil, err
 		}
@@ -633,7 +645,7 @@ SET status = 'fetch_failed',
     verification_error = $2,
     verification_checked_at = now()
 WHERE id = $1
-RETURNING id, session_id, document_name, source_url, target_url, target_s3_key, content_hash, cached_s3_key, signed_s3_key, cms_s3_key, status, last_error, upload_attempts, signed_at, uploaded_at, created_at, hash_source, source_s3_bucket, source_s3_key, source_content_type, source_size_bytes, source_meta_hash, verification_status, verification_checked_at, verification_error, verification_attempts, verification_next_at, client_index
+RETURNING id, session_id, document_name, source_url, target_url, target_s3_key, content_hash, cached_s3_key, signed_s3_key, cms_s3_key, status, last_error, upload_attempts, signed_at, uploaded_at, created_at, hash_source, source_s3_bucket, source_s3_key, source_content_type, source_size_bytes, source_meta_hash, verification_status, verification_checked_at, verification_error, verification_attempts, verification_next_at, client_index, client_ref
 `
 
 type MarkSessionDocumentTamperedParams struct {
@@ -675,6 +687,7 @@ func (q *Queries) MarkSessionDocumentTampered(ctx context.Context, arg MarkSessi
 		&i.VerificationAttempts,
 		&i.VerificationNextAt,
 		&i.ClientIndex,
+		&i.ClientRef,
 	)
 	return i, err
 }
@@ -683,7 +696,7 @@ const markSessionDocumentUploaded = `-- name: MarkSessionDocumentUploaded :one
 UPDATE signing_session_documents
 SET status = 'uploaded', uploaded_at = now()
 WHERE id = $1
-RETURNING id, session_id, document_name, source_url, target_url, target_s3_key, content_hash, cached_s3_key, signed_s3_key, cms_s3_key, status, last_error, upload_attempts, signed_at, uploaded_at, created_at, hash_source, source_s3_bucket, source_s3_key, source_content_type, source_size_bytes, source_meta_hash, verification_status, verification_checked_at, verification_error, verification_attempts, verification_next_at, client_index
+RETURNING id, session_id, document_name, source_url, target_url, target_s3_key, content_hash, cached_s3_key, signed_s3_key, cms_s3_key, status, last_error, upload_attempts, signed_at, uploaded_at, created_at, hash_source, source_s3_bucket, source_s3_key, source_content_type, source_size_bytes, source_meta_hash, verification_status, verification_checked_at, verification_error, verification_attempts, verification_next_at, client_index, client_ref
 `
 
 func (q *Queries) MarkSessionDocumentUploaded(ctx context.Context, id uuid.UUID) (SigningSessionDocument, error) {
@@ -718,6 +731,7 @@ func (q *Queries) MarkSessionDocumentUploaded(ctx context.Context, id uuid.UUID)
 		&i.VerificationAttempts,
 		&i.VerificationNextAt,
 		&i.ClientIndex,
+		&i.ClientRef,
 	)
 	return i, err
 }
@@ -769,7 +783,7 @@ const resetSessionDocumentForRetry = `-- name: ResetSessionDocumentForRetry :one
 UPDATE signing_session_documents
 SET status = 'signed', upload_attempts = 0, last_error = NULL, target_url = $2
 WHERE id = $1
-RETURNING id, session_id, document_name, source_url, target_url, target_s3_key, content_hash, cached_s3_key, signed_s3_key, cms_s3_key, status, last_error, upload_attempts, signed_at, uploaded_at, created_at, hash_source, source_s3_bucket, source_s3_key, source_content_type, source_size_bytes, source_meta_hash, verification_status, verification_checked_at, verification_error, verification_attempts, verification_next_at, client_index
+RETURNING id, session_id, document_name, source_url, target_url, target_s3_key, content_hash, cached_s3_key, signed_s3_key, cms_s3_key, status, last_error, upload_attempts, signed_at, uploaded_at, created_at, hash_source, source_s3_bucket, source_s3_key, source_content_type, source_size_bytes, source_meta_hash, verification_status, verification_checked_at, verification_error, verification_attempts, verification_next_at, client_index, client_ref
 `
 
 type ResetSessionDocumentForRetryParams struct {
@@ -809,6 +823,7 @@ func (q *Queries) ResetSessionDocumentForRetry(ctx context.Context, arg ResetSes
 		&i.VerificationAttempts,
 		&i.VerificationNextAt,
 		&i.ClientIndex,
+		&i.ClientRef,
 	)
 	return i, err
 }
@@ -849,7 +864,7 @@ const updateSessionDocumentAfterFetch = `-- name: UpdateSessionDocumentAfterFetc
 UPDATE signing_session_documents
 SET content_hash = $2, cached_s3_key = $3, status = 'ready'
 WHERE id = $1
-RETURNING id, session_id, document_name, source_url, target_url, target_s3_key, content_hash, cached_s3_key, signed_s3_key, cms_s3_key, status, last_error, upload_attempts, signed_at, uploaded_at, created_at, hash_source, source_s3_bucket, source_s3_key, source_content_type, source_size_bytes, source_meta_hash, verification_status, verification_checked_at, verification_error, verification_attempts, verification_next_at, client_index
+RETURNING id, session_id, document_name, source_url, target_url, target_s3_key, content_hash, cached_s3_key, signed_s3_key, cms_s3_key, status, last_error, upload_attempts, signed_at, uploaded_at, created_at, hash_source, source_s3_bucket, source_s3_key, source_content_type, source_size_bytes, source_meta_hash, verification_status, verification_checked_at, verification_error, verification_attempts, verification_next_at, client_index, client_ref
 `
 
 type UpdateSessionDocumentAfterFetchParams struct {
@@ -891,6 +906,7 @@ func (q *Queries) UpdateSessionDocumentAfterFetch(ctx context.Context, arg Updat
 		&i.VerificationAttempts,
 		&i.VerificationNextAt,
 		&i.ClientIndex,
+		&i.ClientRef,
 	)
 	return i, err
 }
@@ -899,7 +915,7 @@ const updateSessionDocumentAfterFetchKeepHash = `-- name: UpdateSessionDocumentA
 UPDATE signing_session_documents
 SET cached_s3_key = $2, status = 'ready'
 WHERE id = $1
-RETURNING id, session_id, document_name, source_url, target_url, target_s3_key, content_hash, cached_s3_key, signed_s3_key, cms_s3_key, status, last_error, upload_attempts, signed_at, uploaded_at, created_at, hash_source, source_s3_bucket, source_s3_key, source_content_type, source_size_bytes, source_meta_hash, verification_status, verification_checked_at, verification_error, verification_attempts, verification_next_at, client_index
+RETURNING id, session_id, document_name, source_url, target_url, target_s3_key, content_hash, cached_s3_key, signed_s3_key, cms_s3_key, status, last_error, upload_attempts, signed_at, uploaded_at, created_at, hash_source, source_s3_bucket, source_s3_key, source_content_type, source_size_bytes, source_meta_hash, verification_status, verification_checked_at, verification_error, verification_attempts, verification_next_at, client_index, client_ref
 `
 
 type UpdateSessionDocumentAfterFetchKeepHashParams struct {
@@ -940,6 +956,7 @@ func (q *Queries) UpdateSessionDocumentAfterFetchKeepHash(ctx context.Context, a
 		&i.VerificationAttempts,
 		&i.VerificationNextAt,
 		&i.ClientIndex,
+		&i.ClientRef,
 	)
 	return i, err
 }
@@ -948,7 +965,7 @@ const updateSessionDocumentAfterSign = `-- name: UpdateSessionDocumentAfterSign 
 UPDATE signing_session_documents
 SET cms_s3_key = $2, signed_s3_key = $3, status = 'signed', signed_at = now()
 WHERE id = $1
-RETURNING id, session_id, document_name, source_url, target_url, target_s3_key, content_hash, cached_s3_key, signed_s3_key, cms_s3_key, status, last_error, upload_attempts, signed_at, uploaded_at, created_at, hash_source, source_s3_bucket, source_s3_key, source_content_type, source_size_bytes, source_meta_hash, verification_status, verification_checked_at, verification_error, verification_attempts, verification_next_at, client_index
+RETURNING id, session_id, document_name, source_url, target_url, target_s3_key, content_hash, cached_s3_key, signed_s3_key, cms_s3_key, status, last_error, upload_attempts, signed_at, uploaded_at, created_at, hash_source, source_s3_bucket, source_s3_key, source_content_type, source_size_bytes, source_meta_hash, verification_status, verification_checked_at, verification_error, verification_attempts, verification_next_at, client_index, client_ref
 `
 
 type UpdateSessionDocumentAfterSignParams struct {
@@ -989,6 +1006,7 @@ func (q *Queries) UpdateSessionDocumentAfterSign(ctx context.Context, arg Update
 		&i.VerificationAttempts,
 		&i.VerificationNextAt,
 		&i.ClientIndex,
+		&i.ClientRef,
 	)
 	return i, err
 }
@@ -997,7 +1015,7 @@ const updateSessionDocumentStatus = `-- name: UpdateSessionDocumentStatus :one
 UPDATE signing_session_documents
 SET status = $2, last_error = $3
 WHERE id = $1
-RETURNING id, session_id, document_name, source_url, target_url, target_s3_key, content_hash, cached_s3_key, signed_s3_key, cms_s3_key, status, last_error, upload_attempts, signed_at, uploaded_at, created_at, hash_source, source_s3_bucket, source_s3_key, source_content_type, source_size_bytes, source_meta_hash, verification_status, verification_checked_at, verification_error, verification_attempts, verification_next_at, client_index
+RETURNING id, session_id, document_name, source_url, target_url, target_s3_key, content_hash, cached_s3_key, signed_s3_key, cms_s3_key, status, last_error, upload_attempts, signed_at, uploaded_at, created_at, hash_source, source_s3_bucket, source_s3_key, source_content_type, source_size_bytes, source_meta_hash, verification_status, verification_checked_at, verification_error, verification_attempts, verification_next_at, client_index, client_ref
 `
 
 type UpdateSessionDocumentStatusParams struct {
@@ -1038,6 +1056,7 @@ func (q *Queries) UpdateSessionDocumentStatus(ctx context.Context, arg UpdateSes
 		&i.VerificationAttempts,
 		&i.VerificationNextAt,
 		&i.ClientIndex,
+		&i.ClientRef,
 	)
 	return i, err
 }
@@ -1046,7 +1065,7 @@ const updateSessionDocumentTargetURL = `-- name: UpdateSessionDocumentTargetURL 
 UPDATE signing_session_documents
 SET target_url = $2
 WHERE id = $1
-RETURNING id, session_id, document_name, source_url, target_url, target_s3_key, content_hash, cached_s3_key, signed_s3_key, cms_s3_key, status, last_error, upload_attempts, signed_at, uploaded_at, created_at, hash_source, source_s3_bucket, source_s3_key, source_content_type, source_size_bytes, source_meta_hash, verification_status, verification_checked_at, verification_error, verification_attempts, verification_next_at, client_index
+RETURNING id, session_id, document_name, source_url, target_url, target_s3_key, content_hash, cached_s3_key, signed_s3_key, cms_s3_key, status, last_error, upload_attempts, signed_at, uploaded_at, created_at, hash_source, source_s3_bucket, source_s3_key, source_content_type, source_size_bytes, source_meta_hash, verification_status, verification_checked_at, verification_error, verification_attempts, verification_next_at, client_index, client_ref
 `
 
 type UpdateSessionDocumentTargetURLParams struct {
@@ -1086,6 +1105,7 @@ func (q *Queries) UpdateSessionDocumentTargetURL(ctx context.Context, arg Update
 		&i.VerificationAttempts,
 		&i.VerificationNextAt,
 		&i.ClientIndex,
+		&i.ClientRef,
 	)
 	return i, err
 }

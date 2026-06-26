@@ -23,9 +23,9 @@ RETURNING *;
 -- name: CreateSigningSessionDocument :one
 INSERT INTO signing_session_documents (
     session_id, document_name, source_url, target_url, target_s3_key,
-    content_hash, status, client_index
+    content_hash, status, client_index, client_ref
 ) VALUES (
-    $1, $2, $3, $4, $5, '', 'pending', $6
+    $1, $2, $3, $4, $5, '', 'pending', $6, $7
 )
 RETURNING *;
 
@@ -36,12 +36,12 @@ INSERT INTO signing_session_documents (
     session_id, document_name, source_url, target_url, target_s3_key,
     content_hash, hash_source,
     source_s3_bucket, source_s3_key, source_content_type, source_size_bytes,
-    status, client_index
+    status, client_index, client_ref
 ) VALUES (
     $1, $2, $3, $4, $5,
     $6, 'client',
     $7, $8, $9, $10,
-    'ready', $11
+    'ready', $11, $12
 )
 RETURNING *;
 

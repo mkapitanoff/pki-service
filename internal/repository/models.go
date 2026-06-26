@@ -329,6 +329,7 @@ type SigningSessionDocument struct {
 	VerificationAttempts  int32          `json:"verification_attempts"`
 	VerificationNextAt    sql.NullTime   `json:"verification_next_at"`
 	ClientIndex           sql.NullInt32  `json:"client_index"`
+	ClientRef             sql.NullString `json:"client_ref"`
 }
 
 type Tenant struct {

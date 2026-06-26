@@ -39,6 +39,8 @@ func NewSignStatusHandler(
 type sessionDocResponse struct {
 	DocID      string  `json:"doc_id"`
 	Name       string  `json:"name"`
+	// ClientRef — эхо ref'а из initiate (если был задан) для маппинга.
+	ClientRef  string  `json:"client_ref,omitempty"`
 	// Status — внутреннее представление (back-compat для Lovable Edge).
 	Status     string  `json:"status"`
 	// State — нормализованный enum для интеграций:
@@ -147,6 +149,9 @@ func (h *SignStatusHandler) HandleGetStatus(w http.ResponseWriter, r *http.Reque
 			Name:   d.DocumentName,
 			Status: d.Status,
 			State:  docStateFromStatus(d.Status),
+		}
+		if d.ClientRef.Valid {
+			rd.ClientRef = d.ClientRef.String
 		}
 		if d.TargetS3Key.Valid {
 			rd.S3Key = d.TargetS3Key.String

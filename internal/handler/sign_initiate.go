@@ -56,6 +56,11 @@ type initiateDocInput struct {
 	SourceURL     string `json:"source_url"`
 	TargetURL     string `json:"target_url"`
 	TargetS3Key   string `json:"target_s3_key"`
+	// ClientRef — опциональный доменный ID документа на стороне Lovable.
+	// Если задан, возвращается как есть в response, чтобы Lovable
+	// сопоставлял доки по ref (не по индексу). Уникальность в рамках
+	// сессии валидируется handler'ом.
+	ClientRef     string `json:"client_ref,omitempty"`
 	S3Bucket      string `json:"s3_bucket,omitempty"`      // client-mode
 	S3Key         string `json:"s3_key,omitempty"`         // client-mode
 	Hash          string `json:"hash,omitempty"`           // base64 SHA-256, client-mode
@@ -75,6 +80,8 @@ type initiateRequest struct {
 type initiateDocResponse struct {
 	DocID         string `json:"doc_id"`
 	Name          string `json:"name"`
+	// ClientRef — эхо опционального ref из request'а (для маппинга у клиента).
+	ClientRef     string `json:"client_ref,omitempty"`
 	Hash          string `json:"hash,omitempty"`
 	HashAlgorithm string `json:"hash_algorithm,omitempty"`
 	Status        string `json:"status"`
@@ -106,6 +113,26 @@ func (h *SignInitiateHandler) HandleInitiate(w http.ResponseWriter, r *http.Requ
 		respondError(w, apperr.ErrInvalidRequest.WithCause(fmt.Errorf("documents must have 1–20 items")))
 		return
 	}
+	// Уникальность client_ref в рамках сессии — мягкая (валидация в коде,
+	// не constraint'ом БД). Lovable может не присылать ref вообще
+	// (legacy путь), в этом случае пропускаем проверку.
+	clientRefSeen := make(map[string]int, len(req.Documents))
+	for i, d := range req.Documents {
+		if d.ClientRef == "" {
+			continue
+		}
+		if prev, ok := clientRefSeen[d.ClientRef]; ok {
+			respondErrorReq(w, r, apperr.ErrInvalidRequest.WithDetails(map[string]any{
+				"reason":     "duplicate_client_ref",
+				"client_ref": d.ClientRef,
+				"index":      i,
+				"first":      prev,
+			}))
+			return
+		}
+		clientRefSeen[d.ClientRef] = i
+	}
+
 	// Распарсенные client-mode-хэши (hex) для каждого документа; пустая
 	// строка означает legacy режим (фетчер посчитает сам).
 	clientHashHex := make([]string, len(req.Documents))
@@ -207,6 +234,7 @@ func (h *SignInitiateHandler) HandleInitiate(w http.ResponseWriter, r *http.Requ
 		// индексу. Сохраняем позицию в БД, чтобы ListSessionDocuments
 		// (ORDER BY client_index NULLS LAST) вернул их в исходном порядке.
 		clientIdx := sql.NullInt32{Int32: int32(i), Valid: true}
+		clientRef := toNullString(d.ClientRef)
 		if clientHashHex[i] != "" {
 			appDoc, cerr = h.queries.CreateSigningSessionDocumentWithHash(ctx, repository.CreateSigningSessionDocumentWithHashParams{
 				SessionID:         session.ID,
@@ -220,6 +248,7 @@ func (h *SignInitiateHandler) HandleInitiate(w http.ResponseWriter, r *http.Requ
 				SourceContentType: toNullString(d.ContentType),
 				SourceSizeBytes:   sql.NullInt64{Int64: d.Size, Valid: d.Size > 0},
 				ClientIndex:       clientIdx,
+				ClientRef:         clientRef,
 			})
 		} else {
 			appDoc, cerr = h.queries.CreateSigningSessionDocument(ctx, repository.CreateSigningSessionDocumentParams{
@@ -229,6 +258,7 @@ func (h *SignInitiateHandler) HandleInitiate(w http.ResponseWriter, r *http.Requ
 				TargetUrl:    toNullString(d.TargetURL),
 				TargetS3Key:  toNullString(d.TargetS3Key),
 				ClientIndex:  clientIdx,
+				ClientRef:    clientRef,
 			})
 		}
 		if cerr != nil {
@@ -277,6 +307,9 @@ func (h *SignInitiateHandler) HandleInitiate(w http.ResponseWriter, r *http.Requ
 			DocID:  doc.ID.String(),
 			Name:   doc.DocumentName,
 			Status: doc.Status,
+		}
+		if doc.ClientRef.Valid {
+			rd.ClientRef = doc.ClientRef.String
 		}
 		if doc.Status == "ready" {
 			allFailed = false
