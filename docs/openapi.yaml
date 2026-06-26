@@ -462,96 +462,122 @@ paths:
     post:
       tags: [SessionSigning]
       summary: Создать сессию подписания и поставить документы в очередь скачивания
+      description: |
+        Hash-flow (рекомендуется): клиент уже посчитал SHA-256 PDF и положил
+        в `x-amz-meta-sha256` объекта S3 → передаёт `hash`, `s3_bucket`,
+        `s3_key` в каждом документе → PKI не качает синхронно.
+        Legacy-flow: только `source_url`; PKI скачает PDF и сам посчитает хэш.
+
+        **Idempotency:** заголовок `Idempotency-Key` (произвольная строка ≤
+        255 символов). Повтор с тем же ключом и Authorization-тенантом отдаёт
+        кэшированный ответ + `X-Idempotent-Replay: true`. TTL 24h.
+
+        **Mapping response.documents с request.documents:** используйте
+        `client_ref` (если задан) или `client_index` — порядок гарантирован
+        начиная с 2026-06; не полагайтесь на имя файла как ключ.
+      parameters:
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+        - { $ref: '#/components/parameters/RequestID' }
       requestBody:
         required: true
         content:
           application/json:
-            schema:
-              type: object
-              required: [documents, signer_role]
-              properties:
-                signer_role: { type: string, example: client }
-                callback_url: { type: string, format: uri }
-                documents:
-                  type: array
-                  items:
-                    type: object
-                    required: [url]
-                    properties:
-                      url: { type: string, format: uri, description: S3 URL клиента }
-                      name: { type: string }
-                      external_id: { type: string }
+            schema: { $ref: '#/components/schemas/InitiateRequest' }
       responses:
-        '201':
-          description: Сессия создана
+        '200':
+          description: Сессия создана, у части документов status=ready, у остальных fetch_failed
+          headers:
+            X-Request-Id: { $ref: '#/components/headers/XRequestId' }
+            X-Idempotent-Replay:
+              schema: { type: string }
+              description: '`true` если ответ взят из idempotency-кэша'
           content:
             application/json:
-              schema:
-                type: object
-                properties:
-                  data: { $ref: '#/components/schemas/SigningSession' }
+              schema: { $ref: '#/components/schemas/InitiateResponse' }
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
+        '409':
+          description: Дубликат документа (DUPLICATE_DOCUMENT_NAME или duplicate_client_ref)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '413': { $ref: '#/components/responses/PayloadTooLarge' }
+        '502':
+          description: Все документы провалили fetch (FETCH_FAILED)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
 
   /api/v1/sign/complete:
     post:
       tags: [SessionSigning]
       summary: Завершить сессию — принять CMS, собрать PDF, залить в S3 клиента
+      description: |
+        CMS — base64 detached PKCS#7 (как возвращает NCALayer
+        `kz.gov.pki.knca.basics.signHashes`). Поддерживается std-base64,
+        raw-std-base64, url-safe-base64, raw-url-safe-base64. Внутри CMS
+        проверяется messageDigest ↔ session.hash; mismatch → 422 HASH_MISMATCH.
+      parameters:
+        - { $ref: '#/components/parameters/RequestID' }
       requestBody:
         required: true
         content:
           application/json:
-            schema:
-              type: object
-              required: [session_id, signatures]
-              properties:
-                session_id: { type: string, format: uuid }
-                signatures:
-                  type: array
-                  items:
-                    type: object
-                    required: [document_id, cms]
-                    properties:
-                      document_id: { type: string, format: uuid }
-                      cms: { type: string, description: Base64 detached CMS }
+            schema: { $ref: '#/components/schemas/CompleteRequest' }
       responses:
         '200':
-          description: Завершено
+          description: Завершено; per-document результат в `documents[]`
+          headers:
+            X-Request-Id: { $ref: '#/components/headers/XRequestId' }
           content:
             application/json:
-              schema:
-                type: object
-                properties:
-                  data:
-                    type: object
-                    properties:
-                      session_id: { type: string, format: uuid }
-                      status: { type: string, example: signed }
-                      documents:
-                        type: array
-                        items: { $ref: '#/components/schemas/SessionDocument' }
+              schema: { $ref: '#/components/schemas/CompleteResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { $ref: '#/components/responses/NotFound' }
-        '422': { $ref: '#/components/responses/Unprocessable' }
+        '409':
+          description: Сессия уже completed/failed/expired (SESSION_CLOSED)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '410':
+          description: Сессия истекла по TTL (SESSION_EXPIRED)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '413': { $ref: '#/components/responses/PayloadTooLarge' }
+        '422':
+          description: |
+            Бизнес-ошибка CMS. Возможные коды:
+            `INVALID_CMS_BASE64`, `INVALID_CMS_STRUCTURE`, `HASH_MISMATCH`,
+            `CERT_REVOKED`, `CERT_NOT_TRUSTED`, `CMS_INVALID`.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
 
   /api/v1/sign/status/{session_id}:
     get:
       tags: [SessionSigning]
       summary: Статус сессии
+      description: |
+        Возвращает агрегированный статус сессии + per-document состояние с
+        нормализованным `state` enum для интеграций. Поле `status` сохранено
+        для back-compat (raw внутренний статус).
       parameters:
         - name: session_id
           in: path
           required: true
           schema: { type: string, format: uuid }
+        - { $ref: '#/components/parameters/RequestID' }
       responses:
         '200':
           description: OK
+          headers:
+            X-Request-Id: { $ref: '#/components/headers/XRequestId' }
           content:
             application/json:
-              schema:
-                type: object
-                properties:
-                  data: { $ref: '#/components/schemas/SigningSession' }
+              schema: { $ref: '#/components/schemas/SessionStatusResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { $ref: '#/components/responses/NotFound' }
 
   /api/v1/sign/refresh-urls:
@@ -1057,6 +1083,32 @@ components:
       in: path
       required: true
       schema: { type: string }
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: false
+      schema: { type: string, maxLength: 255 }
+      description: |
+        Идентификатор для дедупликации повторных запросов. Повтор с тем же
+        ключом + тем же (method, path, tenant) в течение 24h возвращает
+        кэшированный ответ + `X-Idempotent-Replay: true`. Рекомендуется
+        UUID или хэш payload.
+    RequestID:
+      name: X-Request-Id
+      in: header
+      required: false
+      schema: { type: string }
+      description: |
+        Идентификатор для сквозной корреляции логов. Если не задан, PKI
+        генерирует UUID и возвращает в response header. Используйте один
+        и тот же ID для всех вызовов в рамках одной операции у клиента.
+
+  headers:
+    XRequestId:
+      schema: { type: string }
+      description: |
+        Echo входящего X-Request-Id, либо сгенерированный UUID. Используется
+        для корреляции логов между Lovable Edge и PKI.
 
   responses:
     BadRequest:
@@ -1089,16 +1141,244 @@ components:
       content:
         application/json:
           schema: { $ref: '#/components/schemas/Error' }
+    PayloadTooLarge:
+      description: Тело превышает лимит (1 MiB на /sign/*, 50 MiB на /upload, /batch/upload)
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
 
   schemas:
     Error:
       type: object
+      description: |
+        Единый envelope ошибок для всех 4xx/5xx ответов API. `code` —
+        машинно-читаемый, `message` — человекочитаемый, `request_id` —
+        корреляция с логами, `details` — поле-зависимые данные.
       properties:
         error:
           type: object
+          required: [code, message]
           properties:
-            code: { type: string, example: CMS_INVALID }
-            message: { type: string, example: CMS signature is invalid }
+            code:
+              type: string
+              example: HASH_MISMATCH
+              description: |
+                Известные значения:
+                  Общие: INVALID_REQUEST, UNAUTHORIZED, FORBIDDEN,
+                         PAYLOAD_TOO_LARGE, INTERNAL.
+                  Документы: DOCUMENT_NOT_FOUND, DUPLICATE_DOCUMENT_NAME.
+                  Сессии: SESSION_NOT_FOUND, SESSION_EXPIRED, SESSION_CLOSED.
+                  CMS: INVALID_CMS_BASE64, INVALID_CMS_STRUCTURE,
+                       HASH_MISMATCH, CMS_INVALID, CERT_REVOKED,
+                       CERT_NOT_TRUSTED.
+                  Fetch: FETCH_FAILED.
+            message: { type: string, example: 'CMS messageDigest does not match document hash' }
+            request_id:
+              type: string
+              description: 'Сквозной корреляционный ID (тот же, что в X-Request-Id header)'
+              example: '550e8400-e29b-41d4-a716-446655440000'
+            details:
+              type: object
+              additionalProperties: true
+              description: |
+                Поле-зависимые данные. Примеры:
+                  DUPLICATE_DOCUMENT_NAME: { name: "doc.pdf", index: 3 }
+                  PAYLOAD_TOO_LARGE: { limit_bytes: 1048576 }
+                  INVALID_REQUEST + duplicate_client_ref: { reason, client_ref, index, first }
+
+    InitiateRequest:
+      type: object
+      required: [documents, signer_role]
+      properties:
+        signer_role:
+          type: string
+          enum: [client, manager, director]
+        application_id:
+          type: string
+          description: 'Внешний доменный ID заявки (для логов/аудита)'
+        callback_url:
+          type: string
+          format: uri
+          description: 'HTTPS-URL для webhook session_completed/session_failed (HMAC X-PKI-Signature)'
+        callback_secret:
+          type: string
+          description: 'Обязателен если callback_url задан. HMAC-секрет.'
+        documents:
+          type: array
+          minItems: 1
+          maxItems: 20
+          items: { $ref: '#/components/schemas/InitiateDocInput' }
+
+    InitiateDocInput:
+      type: object
+      required: [name, source_url, target_url]
+      properties:
+        id:
+          type: string
+          description: 'Опциональный внешний ID документа (для логов)'
+        name:
+          type: string
+          description: 'Имя файла. Уникально в рамках сессии — иначе 409 DUPLICATE_DOCUMENT_NAME'
+        source_url:
+          type: string
+          format: uri
+          description: 'Presigned HTTPS GET URL для скачивания PDF клиентом. Рекомендуемый TTL — 2h.'
+        target_url:
+          type: string
+          format: uri
+          description: 'Presigned HTTPS PUT URL для заливки подписанного PDF.'
+        target_s3_key:
+          type: string
+          description: 'S3-ключ подписанного объекта (для логов/аудита).'
+        client_ref:
+          type: string
+          description: |
+            Опциональный доменный ID документа на стороне клиента. Если задан,
+            возвращается как есть в response — используйте для маппинга вместо
+            сопоставления-по-индексу. Уникальность в рамках сессии валидируется
+            (дубль → 400 INVALID_REQUEST с details.reason="duplicate_client_ref").
+        hash:
+          type: string
+          description: |
+            base64 SHA-256 хэш PDF, посчитанный клиентом. При наличии PKI
+            НЕ скачивает PDF в /sign/initiate (синхронный фетч пропускается).
+        hash_algorithm:
+          type: string
+          enum: ['', SHA256, 'SHA-256']
+          description: 'Алгоритм хэша. Поддерживается только SHA-256.'
+        s3_bucket:
+          type: string
+          description: 'Бакет с исходным PDF (требуется когда hash задан).'
+        s3_key:
+          type: string
+          description: 'Ключ исходного PDF в s3_bucket (требуется когда hash задан).'
+        size:
+          type: integer
+          format: int64
+          description: 'Размер PDF в байтах (для логов/аудита).'
+        content_type:
+          type: string
+          example: application/pdf
+
+    InitiateDocResponse:
+      type: object
+      required: [doc_id, name, status]
+      properties:
+        doc_id:
+          type: string
+          format: uuid
+          description: 'Внутренний UUID документа в PKI'
+        name: { type: string }
+        client_ref:
+          type: string
+          description: 'Эхо ClientRef из request (если задан)'
+        hash:
+          type: string
+          description: 'base64 SHA-256 готовый к подписанию NCALayer-ом'
+        hash_algorithm: { type: string, example: SHA256 }
+        status:
+          type: string
+          enum: [ready, fetch_failed, fetching, pending]
+          description: |
+            Внутренний статус документа на момент возврата. Используйте
+            /sign/status для нормализованного `state` enum.
+        error:
+          type: string
+          description: 'Сообщение об ошибке fetch при status=fetch_failed'
+
+    InitiateResponse:
+      type: object
+      required: [session_id, expires_at, documents]
+      properties:
+        session_id: { type: string, format: uuid }
+        expires_at:
+          type: string
+          format: date-time
+          description: 'TTL сессии (по умолчанию now + 2h)'
+        documents:
+          type: array
+          items: { $ref: '#/components/schemas/InitiateDocResponse' }
+
+    CompleteRequest:
+      type: object
+      required: [session_id, signatures]
+      properties:
+        session_id: { type: string, format: uuid }
+        signatures:
+          type: array
+          minItems: 1
+          items:
+            type: object
+            required: [doc_id, cms]
+            properties:
+              doc_id: { type: string, format: uuid }
+              cms:
+                type: string
+                description: |
+                  base64-encoded detached CMS (PKCS#7). Поддерживаются
+                  std-base64, raw-std-base64, url-safe-base64, raw-url-safe-base64.
+
+    CompleteDocResponse:
+      type: object
+      properties:
+        doc_id: { type: string, format: uuid }
+        name: { type: string }
+        status:
+          type: string
+          enum: [signed, error]
+        s3_key:
+          type: string
+          description: 'Ключ подписанного PDF в S3 клиента (при status=signed)'
+        error:
+          type: string
+          description: 'Сообщение об ошибке при status=error'
+
+    CompleteResponse:
+      type: object
+      properties:
+        succeeded: { type: integer }
+        failed: { type: integer }
+        documents:
+          type: array
+          items: { $ref: '#/components/schemas/CompleteDocResponse' }
+
+    SessionStatusDoc:
+      type: object
+      properties:
+        doc_id: { type: string, format: uuid }
+        name: { type: string }
+        client_ref:
+          type: string
+          description: 'Эхо из /sign/initiate (если был задан)'
+        status:
+          type: string
+          description: 'Raw внутренний статус (back-compat)'
+        state:
+          type: string
+          enum: [PENDING, FETCHING, READY, SIGNING, SIGNED, UPLOADING, UPLOADED, FAILED]
+          description: 'Нормализованный enum для интеграций'
+        error_code:
+          type: string
+          enum: [FETCH_FAILED, UPLOAD_FAILED, SIGNING_FAILED]
+          description: 'Машинно-читаемый код ошибки документа (при state=FAILED)'
+        s3_key: { type: string }
+        signed_at: { type: string, format: date-time, nullable: true }
+        uploaded_at: { type: string, format: date-time, nullable: true }
+        error: { type: string, nullable: true }
+
+    SessionStatusResponse:
+      type: object
+      properties:
+        session_id: { type: string, format: uuid }
+        status:
+          type: string
+          enum: [pending, signing, completed, failed, expired]
+          description: 'Агрегированный статус сессии (derived из документов)'
+        expires_at: { type: string, format: date-time }
+        application_id: { type: string }
+        documents:
+          type: array
+          items: { $ref: '#/components/schemas/SessionStatusDoc' }
 
     AuthResponse:
       type: object
