@@ -70,6 +70,11 @@ spec:
             - { name: NCANODE_DEBUG,   value: "false" }
             - { name: NCANODE_OCSP_URL, value: "http://ocsp.pki.gov.kz/" }
             - { name: NCANODE_TSP_URL,  value: "http://tsp.pki.gov.kz/" }
+            # JVM по умолчанию берёт 25% контейнерной памяти под heap, что
+            # для NCANode + Spring + Tomcat + CRL cache недостаточно и даёт
+            # OOM на первом полле scheduler'а. Явно задаём 75% от лимита
+            # (~1152 MiB heap при 1536 MiB контейнера).
+            - { name: JAVA_TOOL_OPTIONS, value: "-XX:MaxRAMPercentage=75.0 -XX:InitialRAMPercentage=50.0" }
             # NCANODE_CA_URL и NCANODE_CRL_URL намеренно НЕ заданы — как на
             # проде. NCANode использует bootstrap-CA из /app/cache/ca (см.
             # initContainer) + автогенерит CRL URLs из CDP extension.
@@ -81,8 +86,10 @@ spec:
             periodSeconds: 15
             failureThreshold: 6
           resources:
-            requests: { cpu: "100m", memory: "256Mi" }
-            limits:   { cpu: "1",    memory: "768Mi" }
+            # На VPS NCANode держит ~390Mi steady + jvm heap растёт со временем.
+            # 768Mi лимит вызывал OOM при инициализации CRL cache. Ставим 1.5Gi.
+            requests: { cpu: "100m", memory: "512Mi" }
+            limits:   { cpu: "1",    memory: "1536Mi" }
           volumeMounts:
             - { name: cache, mountPath: /app/cache }
       volumes:
