@@ -1,8 +1,18 @@
-# NCANode 3 — sidecar для CMS/OCSP/TSP. Stateless с локальным кэшем CA
-# (заполняется при первом старте по NCANODE_CA_URL). PVC не нужен —
-# emptyDir сойдёт; при рестарте CA-bundle докачается заново.
+# NCANode 3 — sidecar для CMS/OCSP/TSP.
 #
-# Параметры из CLAUDE.md PROD-контура (НУЦ РК).
+# Особенность НУЦ РК: старые URL для root CA (pki.gov.kz/cert/*.cer) больше
+# не отвечают — сайт мигрирован на WordPress, /cert/* → 404. NCANode на
+# проде (VPS 77.42.30.254) работает потому что 6 CA-файлов были скачаны
+# заранее и лежат в persistent volume /app/cache/ca/. Дальше NCANode
+# читает CDP extensions из этих CA и качает актуальные CRL c
+# crl.pki.gov.kz/nca_d_*.crl самостоятельно — наши NCANODE_CRL_URL не
+# нужны и даже вредны (устаревшие пути → download failure).
+#
+# Здесь bootstrap-CA — из ConfigMap `ncanode-ca-bootstrap` (6 файлов,
+# ~7 KB), скопированных с прода. Init-container кладёт их в /app/cache/ca/
+# перед запуском Spring Boot.
+#
+# NCANODE_CA_URL и NCANODE_CRL_URL НЕ задаём — как на проде.
 ---
 apiVersion: v1
 kind: Service
@@ -31,6 +41,24 @@ spec:
       # k8s service-link env (NCANODE_PORT=tcp://...) ломает Spring Boot,
       # который читает свой NCANODE_PORT как server.port (Integer).
       enableServiceLinks: false
+      initContainers:
+        # Копируем bootstrap CA-набор из ConfigMap ncanode-ca-bootstrap
+        # в /app/cache/ca/. NCANode дальше сам обновляет CRL через
+        # CDP extensions в этих CA.
+        - name: ca-bootstrap
+          image: busybox:1.36
+          command:
+            - sh
+            - -c
+            - |
+              set -eu
+              mkdir -p /cache/ca
+              cp /bootstrap/*.cer /cache/ca/
+              echo "seeded /cache/ca:"
+              ls -la /cache/ca/
+          volumeMounts:
+            - { name: cache, mountPath: /cache }
+            - { name: ca-bootstrap, mountPath: /bootstrap, readOnly: true }
       containers:
         - name: ncanode
           image: malikzh/ncanode:latest
@@ -42,8 +70,9 @@ spec:
             - { name: NCANODE_DEBUG,   value: "false" }
             - { name: NCANODE_OCSP_URL, value: "http://ocsp.pki.gov.kz/" }
             - { name: NCANODE_TSP_URL,  value: "http://tsp.pki.gov.kz/" }
-            - { name: NCANODE_CRL_URL,  value: "http://crl.pki.gov.kz/nca_rsa.crl http://crl.pki.gov.kz/nca_gost2022.crl" }
-            - { name: NCANODE_CA_URL,   value: "http://pki.gov.kz/cert/root_gost2022.cer http://pki.gov.kz/cert/root_rsa.cer" }
+            # NCANODE_CA_URL и NCANODE_CRL_URL намеренно НЕ заданы — как на
+            # проде. NCANode использует bootstrap-CA из /app/cache/ca (см.
+            # initContainer) + автогенерит CRL URLs из CDP extension.
           ports:
             - { name: http, containerPort: 14579 }
           readinessProbe:
@@ -59,3 +88,6 @@ spec:
       volumes:
         - name: cache
           emptyDir: {}
+        - name: ca-bootstrap
+          configMap:
+            name: ncanode-ca-bootstrap
