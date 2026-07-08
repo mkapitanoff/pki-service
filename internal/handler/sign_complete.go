@@ -34,6 +34,7 @@ type SignCompleteHandler struct {
 	extS3                   s3client.ExternalS3Client
 	verificationEnabled     bool          // фиче-флаг async-сверки
 	verificationInitialWait time.Duration // задержка перед первой попыткой
+	verifyBaseURL           string        // базовый URL для QR/verify-ссылки, напр. https://pki.fin4b.kz
 }
 
 func NewSignCompleteHandler(
@@ -43,6 +44,7 @@ func NewSignCompleteHandler(
 	extS3 s3client.ExternalS3Client,
 	verificationEnabled bool,
 	verificationInitialWait time.Duration,
+	verifyBaseURL string,
 ) *SignCompleteHandler {
 	if verificationInitialWait <= 0 {
 		verificationInitialWait = 60 * time.Second
@@ -54,6 +56,7 @@ func NewSignCompleteHandler(
 		extS3:                   extS3,
 		verificationEnabled:     verificationEnabled,
 		verificationInitialWait: verificationInitialWait,
+		verifyBaseURL:           verifyBaseURL,
 	}
 }
 
@@ -268,7 +271,8 @@ func (h *SignCompleteHandler) processSig(
 	}
 
 	// 7. Build signed PDF with QR stamp + sign page (same as service.Sign).
-	signedPDF, err := h.buildSignedPDF(ctx, pdfBytes, cmsBase64, doc, session, vr)
+	qrURL := fmt.Sprintf("%s/verify/%s", h.verifyBaseURL, doc.ID)
+	signedPDF, err := h.buildSignedPDF(ctx, pdfBytes, doc, session, vr, qrURL)
 	if err != nil {
 		return nil, fmt.Errorf("build signed pdf: %w", err)
 	}
@@ -292,6 +296,31 @@ func (h *SignCompleteHandler) processSig(
 	})
 	if err != nil {
 		return nil, fmt.Errorf("update after sign: %w", err)
+	}
+
+	// 9b. Персист signer/cert-полей + реального verify-URL — раньше vr
+	// использовался только транзиентно для Листа подписей и терялся. Без
+	// этого /verify/{doc.ID} не может отрендерить страницу верификации, а QR
+	// в PDF указывал на нерабочий плейсхолдер. Non-fatal: PDF уже собран
+	// корректно независимо от того, записалось ли это в БД.
+	if _, err := h.queries.UpdateSessionDocumentSignerInfo(ctx, repository.UpdateSessionDocumentSignerInfoParams{
+		ID:            doc.ID,
+		SignerIin:     sql.NullString{String: vr.SignerIIN, Valid: vr.SignerIIN != ""},
+		SignerName:    sql.NullString{String: vr.SignerName, Valid: vr.SignerName != ""},
+		SignerBin:     sql.NullString{String: vr.SignerBIN, Valid: vr.SignerBIN != ""},
+		OrgName:       sql.NullString{String: vr.OrgName, Valid: vr.OrgName != ""},
+		SignerType:    sql.NullString{String: vr.SignerType, Valid: vr.SignerType != ""},
+		Basis:         sql.NullString{String: vr.Basis, Valid: vr.Basis != ""},
+		CertSerial:    sql.NullString{String: vr.CertSerial, Valid: vr.CertSerial != ""},
+		CertNotBefore: sql.NullTime{Time: vr.CertNotBefore, Valid: !vr.CertNotBefore.IsZero()},
+		CertNotAfter:  sql.NullTime{Time: vr.CertNotAfter, Valid: !vr.CertNotAfter.IsZero()},
+		CaName:        sql.NullString{String: vr.CAName, Valid: vr.CAName != ""},
+		OcspStatus:    sql.NullString{String: vr.OCSPStatus, Valid: vr.OCSPStatus != ""},
+		TspTime:       sql.NullTime{Time: vr.TSPTime, Valid: !vr.TSPTime.IsZero()},
+		SignFormat:    sql.NullString{String: vr.SignFormat, Valid: vr.SignFormat != ""},
+		QrUrl:         sql.NullString{String: qrURL, Valid: true},
+	}); err != nil {
+		log.Printf("sign_complete: persist signer info doc=%s: %v (non-fatal)", doc.ID, err)
 	}
 
 	// 9a. Поставить документ в очередь async-верификации (внутренний контроль
@@ -329,18 +358,15 @@ func (h *SignCompleteHandler) processSig(
 func (h *SignCompleteHandler) buildSignedPDF(
 	ctx context.Context,
 	pdfBytes []byte,
-	cmsBase64 string,
 	doc repository.SigningSessionDocument,
 	session repository.SigningSession,
 	vr *ncanode.VerifyResult,
+	qrURL string,
 ) ([]byte, error) {
 	// Compute document hash for the sign page display.
 	sum := sha256.Sum256(pdfBytes)
 	docHashHex := hex.EncodeToString(sum[:])
 
-	// Generate QR pointing to a verify URL (we don't have a separate verify route for
-	// session docs, so we use the CMS key as a stable identifier placeholder).
-	qrURL := fmt.Sprintf("data:cms:%s", doc.ID)
 	qrPNG, err := qr.GenerateQR(qrURL, qr.DefaultSize)
 	if err != nil {
 		return nil, fmt.Errorf("generate qr: %w", err)

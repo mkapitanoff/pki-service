@@ -99,6 +99,17 @@ SET cms_s3_key = $2, signed_s3_key = $3, status = 'signed', signed_at = now()
 WHERE id = $1
 RETURNING *;
 
+-- name: UpdateSessionDocumentSignerInfo :one
+-- Персистит ncanode.VerifyResult + реальный verify QR-URL. Non-fatal при
+-- ошибке (вызывающий код логирует и продолжает — PDF уже собран корректно).
+UPDATE signing_session_documents
+SET signer_iin = $2, signer_name = $3, signer_bin = $4, org_name = $5,
+    signer_type = $6, basis = $7, cert_serial = $8, cert_not_before = $9,
+    cert_not_after = $10, ca_name = $11, ocsp_status = $12, tsp_time = $13,
+    sign_format = $14, qr_url = $15
+WHERE id = $1
+RETURNING *;
+
 -- name: UpdateSessionDocumentTargetURL :one
 UPDATE signing_session_documents
 SET target_url = $2
@@ -186,3 +197,22 @@ SET verification_status = (
     WHERE ssd.session_id = s.id
 )
 WHERE s.id = $1;
+
+-- name: ListSigningSessionDocumentsForRegistry :many
+-- Реестр подписаний (admin-only): по документам, не по сессиям — оператор
+-- должен видеть каждый документ отдельно. tenant_id/status — nullable
+-- фильтры, NULL = без фильтра.
+SELECT ssd.*, ss.tenant_id AS tenant_id, ss.application_id AS application_id,
+       ss.status AS session_status, ss.expires_at AS session_expires_at
+FROM signing_session_documents ssd
+JOIN signing_sessions ss ON ss.id = ssd.session_id
+WHERE (sqlc.narg('tenant_id')::uuid IS NULL OR ss.tenant_id = sqlc.narg('tenant_id')::uuid)
+  AND (sqlc.narg('doc_status')::text IS NULL OR ssd.status = sqlc.narg('doc_status')::text)
+ORDER BY ssd.created_at DESC
+LIMIT sqlc.arg('limit_count') OFFSET sqlc.arg('offset_count');
+
+-- name: CountSigningSessionDocumentsForRegistry :one
+SELECT count(*) FROM signing_session_documents ssd
+JOIN signing_sessions ss ON ss.id = ssd.session_id
+WHERE (sqlc.narg('tenant_id')::uuid IS NULL OR ss.tenant_id = sqlc.narg('tenant_id')::uuid)
+  AND (sqlc.narg('doc_status')::text IS NULL OR ssd.status = sqlc.narg('doc_status')::text);

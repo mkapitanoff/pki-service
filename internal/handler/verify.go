@@ -103,8 +103,9 @@ func (h *VerifyHandler) HandleVerify(w http.ResponseWriter, r *http.Request) {
 	sig, err := h.queries.GetSignatureByIDPublic(r.Context(), sigID)
 	if err != nil {
 		if stderrors.Is(err, sql.ErrNoRows) {
-			w.WriteHeader(http.StatusNotFound)
-			_ = notFoundTmpl.Execute(w, nil)
+			// Не найдено в старой таблице signatures — пробуем session-based
+			// flow (signing_session_documents), используемый Lovable hash-flow.
+			h.renderSessionDocVerify(w, r, sigID)
 			return
 		}
 		w.WriteHeader(http.StatusNotFound)
@@ -132,6 +133,46 @@ func (h *VerifyHandler) HandleVerify(w http.ResponseWriter, r *http.Request) {
 		CertValidTo:   sig.CertNotAfter.Format(dateFmt),
 		SignFormat:    sig.SignFormat,
 		HashShort:     pdf.TruncateSHA256(sig.Sha256Hash),
+		QRBase64:      base64.StdEncoding.EncodeToString(qrPNG),
+	}
+
+	w.WriteHeader(http.StatusOK)
+	_ = verifyTmpl.Execute(w, view)
+}
+
+// renderSessionDocVerify рендерит ту же verifyTmpl для session-based
+// документа (signing_session_documents), используемого Lovable hash-flow.
+// Signer/cert-поля персистятся в /sign/complete (UpdateSessionDocumentSignerInfo)
+// сразу после NCANode-верификации — см. internal/handler/sign_complete.go.
+func (h *VerifyHandler) renderSessionDocVerify(w http.ResponseWriter, r *http.Request, docID uuid.UUID) {
+	doc, err := h.queries.GetSigningSessionDocument(r.Context(), docID)
+	if err != nil || doc.Status != "signed" || !doc.SignerName.Valid {
+		w.WriteHeader(http.StatusNotFound)
+		_ = notFoundTmpl.Execute(w, nil)
+		return
+	}
+
+	qrURL := doc.QrUrl.String
+	qrPNG, err := qr.GenerateQR(qrURL, 200)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+
+	view := verifyView{
+		SignedAt:      doc.SignedAt.Time.Format(dateTimeFmt),
+		OrgName:       doc.OrgName.String,
+		SignerBin:     doc.SignerBin.String,
+		SignerName:    doc.SignerName.String,
+		MaskedIIN:     pdf.MaskIIN(doc.SignerIin.String),
+		SignerType:    doc.SignerType.String,
+		Basis:         doc.Basis.String,
+		CaName:        doc.CaName.String,
+		CertSerial:    pdf.TruncateCertSerial(doc.CertSerial.String),
+		CertValidFrom: doc.CertNotBefore.Time.Format(dateFmt),
+		CertValidTo:   doc.CertNotAfter.Time.Format(dateFmt),
+		SignFormat:    doc.SignFormat.String,
+		HashShort:     pdf.TruncateSHA256(doc.ContentHash.String),
 		QRBase64:      base64.StdEncoding.EncodeToString(qrPNG),
 	}
 

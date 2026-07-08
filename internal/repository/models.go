@@ -330,6 +330,20 @@ type SigningSessionDocument struct {
 	VerificationNextAt    sql.NullTime   `json:"verification_next_at"`
 	ClientIndex           sql.NullInt32  `json:"client_index"`
 	ClientRef             sql.NullString `json:"client_ref"`
+	SignerIin             sql.NullString `json:"signer_iin"`
+	SignerName            sql.NullString `json:"signer_name"`
+	SignerBin             sql.NullString `json:"signer_bin"`
+	OrgName               sql.NullString `json:"org_name"`
+	SignerType            sql.NullString `json:"signer_type"`
+	Basis                 sql.NullString `json:"basis"`
+	CertSerial            sql.NullString `json:"cert_serial"`
+	CertNotBefore         sql.NullTime   `json:"cert_not_before"`
+	CertNotAfter          sql.NullTime   `json:"cert_not_after"`
+	CaName                sql.NullString `json:"ca_name"`
+	OcspStatus            sql.NullString `json:"ocsp_status"`
+	TspTime               sql.NullTime   `json:"tsp_time"`
+	SignFormat            sql.NullString `json:"sign_format"`
+	QrUrl                 sql.NullString `json:"qr_url"`
 }
 
 type Tenant struct {

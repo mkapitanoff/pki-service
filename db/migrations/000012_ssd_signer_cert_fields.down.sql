@@ -1,0 +1,15 @@
+ALTER TABLE signing_session_documents
+    DROP COLUMN IF EXISTS signer_iin,
+    DROP COLUMN IF EXISTS signer_name,
+    DROP COLUMN IF EXISTS signer_bin,
+    DROP COLUMN IF EXISTS org_name,
+    DROP COLUMN IF EXISTS signer_type,
+    DROP COLUMN IF EXISTS basis,
+    DROP COLUMN IF EXISTS cert_serial,
+    DROP COLUMN IF EXISTS cert_not_before,
+    DROP COLUMN IF EXISTS cert_not_after,
+    DROP COLUMN IF EXISTS ca_name,
+    DROP COLUMN IF EXISTS ocsp_status,
+    DROP COLUMN IF EXISTS tsp_time,
+    DROP COLUMN IF EXISTS sign_format,
+    DROP COLUMN IF EXISTS qr_url;

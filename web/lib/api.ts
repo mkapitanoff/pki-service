@@ -379,3 +379,56 @@ export async function adminCreateUser(
 export async function adminDeleteUser(userId: string): Promise<void> {
   return apiFetch(`/api/admin/users/${userId}`, { method: "DELETE" });
 }
+
+// ---- Registry API (signing-session documents, cross-tenant) ----
+
+type NullStr = { String: string; Valid: boolean } | null;
+type NullTime = { Time: string; Valid: boolean } | null;
+
+export type RegistryDocument = {
+  id: string;
+  session_id: string;
+  document_name: string;
+  status: string;
+  signed_at: NullTime;
+  uploaded_at: NullTime;
+  signer_name: NullStr;
+  org_name: NullStr;
+  verification_status: NullStr;
+  tenant_id: string;
+  application_id: NullStr;
+  session_status: string;
+  session_expires_at: string;
+};
+
+export type RegistryListResponse = {
+  documents: RegistryDocument[];
+  total: number;
+  limit: number;
+  offset: number;
+};
+
+export async function adminListRegistry(params: {
+  tenantId?: string;
+  status?: string;
+  limit?: number;
+  offset?: number;
+}): Promise<RegistryListResponse> {
+  const qs = new URLSearchParams();
+  if (params.tenantId) qs.set("tenant_id", params.tenantId);
+  if (params.status) qs.set("status", params.status);
+  if (params.limit) qs.set("limit", String(params.limit));
+  if (params.offset) qs.set("offset", String(params.offset));
+  return apiFetch(`/api/admin/signing-documents?${qs.toString()}`);
+}
+
+export async function adminDownloadRegistryDocument(id: string): Promise<Blob> {
+  const res = await fetch(`${API_BASE}/api/admin/signing-documents/${id}/file`, {
+    headers: authHeaders(false),
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => res.statusText);
+    throw new Error(`HTTP ${res.status}: ${text}`);
+  }
+  return res.blob();
+}

@@ -102,6 +102,7 @@ func main() {
 	signCompleteHandler := handler.NewSignCompleteHandler(
 		queries, ncClient, store, extS3,
 		cfg.Verification.Enabled, verInitialDelay,
+		cfg.App.VerifyBaseURL,
 	)
 	signStatusHandler := handler.NewSignStatusHandler(queries, extS3, store)
 
@@ -284,6 +285,7 @@ func main() {
 	})
 
 	// Admin routes — require JWT + admin role.
+	registryHandler := handler.NewRegistryHandler(queries, store)
 	r.Group(func(admin chi.Router) {
 		admin.Use(jwtMw)
 		admin.Use(handler.RequireAdmin)
@@ -296,6 +298,8 @@ func main() {
 		admin.Post("/api/admin/users", adminHandler.HandleCreateUser)
 		admin.Patch("/api/admin/users/{user_id}", adminHandler.HandleUpdateUser)
 		admin.Delete("/api/admin/users/{user_id}", adminHandler.HandleDeleteUser)
+		admin.Get("/api/admin/signing-documents", registryHandler.HandleListRegistry)
+		admin.Get("/api/admin/signing-documents/{id}/file", registryHandler.HandleDownloadRegistryDocument)
 	})
 
 	// Demo routes — no auth, for frontend testing only.

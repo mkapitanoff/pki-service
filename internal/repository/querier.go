@@ -14,6 +14,7 @@ import (
 type Querier interface {
 	CancelApplication(ctx context.Context, arg CancelApplicationParams) (Application, error)
 	CleanupExpiredIdempotencyKeys(ctx context.Context) error
+	CountSigningSessionDocumentsForRegistry(ctx context.Context, arg CountSigningSessionDocumentsForRegistryParams) (int64, error)
 	CreateAPIKey(ctx context.Context, arg CreateAPIKeyParams) (ApiKey, error)
 	CreateApplication(ctx context.Context, arg CreateApplicationParams) (Application, error)
 	CreateApplicationDocument(ctx context.Context, arg CreateApplicationDocumentParams) (ApplicationDocument, error)
@@ -81,6 +82,10 @@ type Querier interface {
 	// created_at (для legacy-сессий и tie-breaker). Lovable сопоставляет
 	// response.documents с request.documents по индексу.
 	ListSessionDocuments(ctx context.Context, sessionID uuid.UUID) ([]SigningSessionDocument, error)
+	// Реестр подписаний (admin-only): по документам, не по сессиям — оператор
+	// должен видеть каждый документ отдельно. tenant_id/status — nullable
+	// фильтры, NULL = без фильтра.
+	ListSigningSessionDocumentsForRegistry(ctx context.Context, arg ListSigningSessionDocumentsForRegistryParams) ([]ListSigningSessionDocumentsForRegistryRow, error)
 	ListTenantsWithKeyCount(ctx context.Context) ([]ListTenantsWithKeyCountRow, error)
 	ListUsers(ctx context.Context) ([]User, error)
 	ListWebhooksByTenant(ctx context.Context, tenantID uuid.UUID) ([]Webhook, error)
@@ -117,6 +122,9 @@ type Querier interface {
 	// client-mode: hash уже записан, фетчер только кэширует PDF.
 	UpdateSessionDocumentAfterFetchKeepHash(ctx context.Context, arg UpdateSessionDocumentAfterFetchKeepHashParams) (SigningSessionDocument, error)
 	UpdateSessionDocumentAfterSign(ctx context.Context, arg UpdateSessionDocumentAfterSignParams) (SigningSessionDocument, error)
+	// Персистит ncanode.VerifyResult + реальный verify QR-URL. Non-fatal при
+	// ошибке (вызывающий код логирует и продолжает — PDF уже собран корректно).
+	UpdateSessionDocumentSignerInfo(ctx context.Context, arg UpdateSessionDocumentSignerInfoParams) (SigningSessionDocument, error)
 	UpdateSessionDocumentStatus(ctx context.Context, arg UpdateSessionDocumentStatusParams) (SigningSessionDocument, error)
 	UpdateSessionDocumentTargetURL(ctx context.Context, arg UpdateSessionDocumentTargetURLParams) (SigningSessionDocument, error)
 	UpdateSigningSessionStatus(ctx context.Context, arg UpdateSigningSessionStatusParams) (SigningSession, error)
