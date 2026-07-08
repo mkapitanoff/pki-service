@@ -74,15 +74,17 @@ spec:
     - { name: http, port: 8080, targetPort: 8080 }
 ---
 # Ingress для pki.fin4b.kz через встроенный Traefik k3s. TLS терминируется на
-# ICDC ALB (PKI-14), сюда трафик приходит уже HTTP. Соответственно — никаких
-# TLS-секций, только web entrypoint.
+# самом Traefik общим wildcard-сертификатом *.fin4b.kz (secret `cert`), как у
+# id.fin4b.kz (keycloak) и iam.fin4b.kz. Роутер поднимается на обоих entrypoint'ах
+# web,websecure — без websecure HTTPS-запрос не матчится ни одним роутером и
+# Traefik отдаёт 404 дефолтным сертификатом.
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: pki-api
   namespace: platform
   annotations:
-    traefik.ingress.kubernetes.io/router.entrypoints: web
+    traefik.ingress.kubernetes.io/router.entrypoints: web,websecure
 spec:
   ingressClassName: traefik
   rules:
@@ -93,3 +95,7 @@ spec:
             pathType: Prefix
             backend:
               service: { name: pki-api, port: { number: 8080 } }
+  tls:
+    - hosts:
+        - pki.fin4b.kz
+      secretName: cert
