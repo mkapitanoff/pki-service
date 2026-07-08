@@ -49,7 +49,7 @@ type SignatureInfo struct {
 	CertNotAfter  time.Time
 	CAName        string
 	SignFormat    string
-	SHA256Hash    string // raw hex; rendered via TruncateSHA256
+	SHA256Hash    string // raw hex (64); на Листе подписей рендерится полностью
 	Status        string
 	SignedAt      time.Time
 	QRImagePNG    []byte
@@ -114,11 +114,16 @@ func TruncateSHA256(hash string) string {
 	return hash[:8] + "..." + hash[len(hash)-8:]
 }
 
+// kzLocation — Казахстан круглогодично UTC+5 (Asia/Almaty; DST отменён с 2024).
+// Используем FixedZone, чтобы не зависеть от наличия tzdata в alpine-контейнере.
+// Время в БД хранится в UTC (TIMESTAMPTZ) — на Листе подписей показываем по КЗ.
+var kzLocation = time.FixedZone("Asia/Almaty", 5*60*60)
+
 func formatTS(t time.Time) string {
 	if t.IsZero() {
 		t = time.Now()
 	}
-	return t.Format("02.01.2006, 15:04:05")
+	return t.In(kzLocation).Format("02.01.2006, 15:04:05")
 }
 
 func formatDate(t time.Time) string {
@@ -413,17 +418,24 @@ func GenerateSignPage(signatures []SignatureInfo) ([]byte, error) {
 		pdf.CellFormat(textW, 5, "ПОДПИСЬ", "", 1, "L", false, 0, "")
 
 		setFont(9, false)
-		sigRows := []row{
-			{"Формат:", s.SignFormat},
-			{"Хэш SHA-256:", TruncateSHA256(s.SHA256Hash)},
-		}
-		for _, r := range sigRows {
-			pdf.SetX(textX)
-			pdf.SetTextColor(100, 100, 100)
-			pdf.CellFormat(labelW, 5, r.label, "", 0, "L", false, 0, "")
-			pdf.SetTextColor(0, 0, 0)
-			pdf.CellFormat(textW-labelW, 5, r.value, "", 1, "L", false, 0, "")
-		}
+		// Формат — в одну строку.
+		pdf.SetX(textX)
+		pdf.SetTextColor(100, 100, 100)
+		pdf.CellFormat(labelW, 5, "Формат:", "", 0, "L", false, 0, "")
+		pdf.SetTextColor(0, 0, 0)
+		pdf.CellFormat(textW-labelW, 5, s.SignFormat, "", 1, "L", false, 0, "")
+
+		// Хэш SHA-256 — ПОЛНОСТЬЮ (64 hex), чтобы получатель мог проверить
+		// подпись по хэшу на публичной странице верификации. Значение — тем же
+		// рядом, но меньшим кеглем (7), чтобы 64 символа влезли в одну строку
+		// без прироста высоты блока.
+		pdf.SetX(textX)
+		pdf.SetTextColor(100, 100, 100)
+		pdf.CellFormat(labelW, 5, "Хэш SHA-256:", "", 0, "L", false, 0, "")
+		pdf.SetTextColor(0, 0, 0)
+		setFont(7, false)
+		pdf.CellFormat(textW-labelW, 5, s.SHA256Hash, "", 1, "L", false, 0, "")
+		setFont(9, false)
 		// Статус зелёным
 		pdf.SetX(textX)
 		pdf.SetTextColor(100, 100, 100)
