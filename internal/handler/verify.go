@@ -146,7 +146,11 @@ func (h *VerifyHandler) HandleVerify(w http.ResponseWriter, r *http.Request) {
 // сразу после NCANode-верификации — см. internal/handler/sign_complete.go.
 func (h *VerifyHandler) renderSessionDocVerify(w http.ResponseWriter, r *http.Request, docID uuid.UUID) {
 	doc, err := h.queries.GetSigningSessionDocument(r.Context(), docID)
-	if err != nil || doc.Status != "signed" || !doc.SignerName.Valid {
+	// "signed" — подпись принята, PDF собран; "uploaded" — тот же документ,
+	// но уже отправлен в S3 клиента (следующий шаг после signed). Оба
+	// означают успешно подписан. SignerName.Valid — реальный гейт наличия
+	// signer/cert-данных (записанных в /sign/complete).
+	if err != nil || (doc.Status != "signed" && doc.Status != "uploaded") || !doc.SignerName.Valid {
 		w.WriteHeader(http.StatusNotFound)
 		_ = notFoundTmpl.Execute(w, nil)
 		return
