@@ -190,7 +190,12 @@ func main() {
 				w.Header().Set("Access-Control-Allow-Credentials", "true")
 			}
 			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
-			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+			// X-Request-Id и Idempotency-Key — клиент (Lovable) шлёт их для
+			// трейсинга и идемпотентности; без них в allow-headers браузерный
+			// preflight падает → "Failed to fetch". Expose-Headers — чтобы JS
+			// мог прочитать X-Request-Id из ответа для корреляции с логами.
+			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Request-Id, Idempotency-Key")
+			w.Header().Set("Access-Control-Expose-Headers", "X-Request-Id")
 			if r.Method == http.MethodOptions {
 				w.WriteHeader(http.StatusNoContent)
 				return
