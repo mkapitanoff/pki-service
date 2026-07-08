@@ -85,17 +85,14 @@ func FetchAndCacheDocument(
 		return markFetchFailed(ctx, queries, doc, fmt.Errorf("store to MinIO: %w", err))
 	}
 
-	// client-mode: hash уже пришёл в /sign/initiate. Sanity-check: реально
-	// посчитанный SHA должен совпадать. Если нет — клиент мог подменить хэш
-	// или объект изменился между загрузкой и фетчем; помечаем mismatch и
-	// дальше не идём.
+	// client-mode: hash уже пришёл в /sign/initiate и авторитетен. Целостность
+	// (не подменили ли объект в S3) проверяет async verification-воркер по
+	// прямому S3 HEAD (x-amz-meta-sha256 ↔ content_hash). Здесь фетч только
+	// кэширует PDF для /complete; расхождение recompute — WARN, но НЕ валим
+	// сессию и не блокируем подписание.
 	if doc.HashSource == "client" && doc.ContentHash.Valid {
 		if doc.ContentHash.String != hashHex {
-			_, _ = queries.MarkSessionDocumentTampered(ctx, repository.MarkSessionDocumentTamperedParams{
-				ID:                 doc.ID,
-				VerificationError:  sql.NullString{String: "client_hash_mismatch", Valid: true},
-			})
-			return fmt.Errorf("fetcher: client_hash_mismatch doc=%s: want=%s have=%s",
+			log.Printf("fetcher: WARN client_hash recompute mismatch doc=%s want=%s have=%s (integrity handled by async verifier)",
 				doc.ID, doc.ContentHash.String, hashHex)
 		}
 		if _, err := queries.UpdateSessionDocumentAfterFetchKeepHash(ctx, repository.UpdateSessionDocumentAfterFetchKeepHashParams{
@@ -127,4 +124,44 @@ func markFetchFailed(ctx context.Context, queries *repository.Queries, doc repos
 		LastError: sql.NullString{String: cause.Error(), Valid: true},
 	})
 	return cause
+}
+
+// CacheDocumentForComplete — фоновый путь fast-path'а. Документ с клиентским
+// хэшем уже создан со status='ready' (хэш авторитетен), поэтому /sign/initiate
+// НЕ качает его синхронно. Эта функция в фоне скачивает PDF по source_url и
+// кладёт в кэш MinIO, проставляя cached_s3_key, — чтобы /sign/complete встроил
+// подпись без повторного обращения к S3.
+//
+// Важно: статус документа НЕ трогает при ошибке (остаётся 'ready') — только
+// WARN-лог. Если кэш не готов к моменту /complete, тот докачает on-demand.
+func CacheDocumentForComplete(
+	ctx context.Context,
+	doc repository.SigningSessionDocument,
+	extS3 s3client.ExternalS3Client,
+	store storage.Storage,
+	queries *repository.Queries,
+) {
+	rid := reqctx.RequestID(ctx)
+	pdfBytes, contentType, err := s3client.DownloadWithRetry(ctx, extS3, doc.SourceUrl, 3)
+	if err != nil {
+		log.Printf("cache.bg WARN request_id=%s doc=%s download: %v (complete will fetch on-demand)", rid, doc.ID, err)
+		return
+	}
+	if !isAcceptablePDFContentType(contentType) || len(pdfBytes) < 5 || string(pdfBytes[:5]) != "%PDF-" {
+		log.Printf("cache.bg WARN request_id=%s doc=%s not a PDF (content-type=%q)", rid, doc.ID, contentType)
+		return
+	}
+	cachedKey := fmt.Sprintf("cache/%s/%s.pdf", doc.SessionID, doc.ID)
+	if err := store.UploadFile(ctx, cachedKey, pdfBytes, "application/pdf"); err != nil {
+		log.Printf("cache.bg WARN request_id=%s doc=%s store: %v", rid, doc.ID, err)
+		return
+	}
+	if _, err := queries.UpdateSessionDocumentAfterFetchKeepHash(ctx, repository.UpdateSessionDocumentAfterFetchKeepHashParams{
+		ID:          doc.ID,
+		CachedS3Key: sql.NullString{String: cachedKey, Valid: true},
+	}); err != nil {
+		log.Printf("cache.bg WARN request_id=%s doc=%s update: %v", rid, doc.ID, err)
+		return
+	}
+	log.Printf("cache.bg ok request_id=%s doc=%s cached_key=%s", rid, doc.ID, cachedKey)
 }

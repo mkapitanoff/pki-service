@@ -278,12 +278,26 @@ func (h *SignInitiateHandler) HandleInitiate(w http.ResponseWriter, r *http.Requ
 		entries = append(entries, docEntry{appDoc: appDoc, input: d})
 	}
 
-	// 3. Fetch all documents concurrently, timeout 55s.
+	// 3. Обработка документов:
+	//   - Клиентский хэш прислан (fast-path): документ уже создан со
+	//     status='ready' (хэш авторитетен). НЕ качаем синхронно — кэшируем PDF
+	//     в ФОНЕ для /sign/complete, ответ не блокируем. Целостность проверит
+	//     async verification-воркер прямым S3 HEAD.
+	//   - Хэша нет (computed-mode): синхронный fetch+SHA-256, как раньше.
 	fetchCtx, cancel := context.WithTimeout(ctx, 55*time.Second)
 	defer cancel()
 
 	var wg sync.WaitGroup
-	for _, e := range entries {
+	for idx, e := range entries {
+		if clientHashHex[idx] != "" {
+			go func(doc repository.SigningSessionDocument) {
+				bgCtx, bgCancel := context.WithTimeout(context.Background(), 2*time.Minute)
+				defer bgCancel()
+				bgCtx = reqctx.WithRequestID(bgCtx, rid)
+				signer.CacheDocumentForComplete(bgCtx, doc, h.extS3, h.store, h.queries)
+			}(e.appDoc)
+			continue
+		}
 		wg.Add(1)
 		go func(doc repository.SigningSessionDocument) {
 			defer wg.Done()

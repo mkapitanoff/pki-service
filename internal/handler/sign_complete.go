@@ -246,13 +246,25 @@ func (h *SignCompleteHandler) processSig(
 		}
 	}
 
-	// 6. Download cached PDF from our MinIO.
-	if !doc.CachedS3Key.Valid || doc.CachedS3Key.String == "" {
-		return nil, fmt.Errorf("document has no cached_s3_key (fetch may not be complete)")
-	}
-	pdfBytes, err := h.store.DownloadFile(ctx, doc.CachedS3Key.String)
-	if err != nil {
-		return nil, fmt.Errorf("download cached pdf: %w", err)
+	// 6. Получить оригинал PDF. Обычно он уже в кэше MinIO (положил фетчер).
+	// Fast-path (client-hash): фоновый кэш мог не успеть к моменту /complete —
+	// тогда докачиваем оригинал напрямую по source_url.
+	var pdfBytes []byte
+	if doc.CachedS3Key.Valid && doc.CachedS3Key.String != "" {
+		b, derr := h.store.DownloadFile(ctx, doc.CachedS3Key.String)
+		if derr != nil {
+			return nil, fmt.Errorf("download cached pdf: %w", derr)
+		}
+		pdfBytes = b
+	} else {
+		if doc.SourceUrl == "" {
+			return nil, fmt.Errorf("document has no cached_s3_key and no source_url")
+		}
+		b, _, derr := s3client.DownloadWithRetry(ctx, h.extS3, doc.SourceUrl, 3)
+		if derr != nil {
+			return nil, fmt.Errorf("on-demand download source pdf: %w", derr)
+		}
+		pdfBytes = b
 	}
 
 	// 7. Build signed PDF with QR stamp + sign page (same as service.Sign).
