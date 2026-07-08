@@ -1,0 +1,58 @@
+# PKI Frontend (Next.js standalone) в k3s, namespace platform.
+#
+# Отдаёт веб-UI на корне pki.fin4b.kz. API-пути (/api, /auth, /health, /verify)
+# роутятся Ingress'ом на pki-api, всё остальное (/, /_next/*, страницы) — сюда.
+#
+# Образ импортируется локально в k3s containerd (как pki-api, см. pki.yaml):
+#   docker build --platform linux/amd64 --build-arg NEXT_PUBLIC_API_BASE=https://pki.fin4b.kz \
+#     -t pki-frontend:<sha> -t pki-frontend:latest web/
+#   docker save → scp pki-deploy@node → sudo k3s ctr images import.
+# В PROD/CI будет registry.gitlab.fin4b.kz/core/pki-frontend:<sha> — тогда уберём
+# imagePullPolicy: Never.
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pki-frontend
+  namespace: platform
+  labels: { app: pki-frontend, app.kubernetes.io/part-of: pki }
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: pki-frontend }
+  template:
+    metadata:
+      labels: { app: pki-frontend }
+    spec:
+      containers:
+        - name: pki-frontend
+          image: docker.io/library/pki-frontend:latest
+          imagePullPolicy: Never
+          env:
+            - { name: NODE_ENV, value: "production" }
+          ports:
+            - { name: http, containerPort: 3000 }
+          readinessProbe:
+            httpGet: { path: /, port: 3000 }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            failureThreshold: 6
+          livenessProbe:
+            httpGet: { path: /, port: 3000 }
+            initialDelaySeconds: 15
+            periodSeconds: 30
+            failureThreshold: 5
+          resources:
+            requests: { cpu: "50m", memory: "128Mi" }
+            limits:   { cpu: "500m", memory: "384Mi" }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: pki-frontend
+  namespace: platform
+  labels: { app: pki-frontend }
+spec:
+  selector: { app: pki-frontend }
+  ports:
+    - { name: http, port: 3000, targetPort: 3000 }

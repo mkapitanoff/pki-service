@@ -91,10 +91,29 @@ spec:
     - host: pki.fin4b.kz
       http:
         paths:
-          - path: /
+          # API-пути → pki-api. Traefik матчит самый длинный префикс, поэтому
+          # эти правила выигрывают у корневого "/" (→ фронтенд).
+          - path: /api
             pathType: Prefix
             backend:
               service: { name: pki-api, port: { number: 8080 } }
+          - path: /auth
+            pathType: Prefix
+            backend:
+              service: { name: pki-api, port: { number: 8080 } }
+          - path: /health
+            pathType: Prefix
+            backend:
+              service: { name: pki-api, port: { number: 8080 } }
+          - path: /verify
+            pathType: Prefix
+            backend:
+              service: { name: pki-api, port: { number: 8080 } }
+          # Всё остальное (корень, /_next/*, страницы UI) → фронтенд.
+          - path: /
+            pathType: Prefix
+            backend:
+              service: { name: pki-frontend, port: { number: 3000 } }
   tls:
     - hosts:
         - pki.fin4b.kz
