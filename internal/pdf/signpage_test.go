@@ -69,15 +69,30 @@ func TestReplaceLastPage_PageCount(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, 3, origCount)
 
-	newPage, err := GenerateSignPage([]SignatureInfo{sampleSignature()})
+	// Первая подпись: ReplaceLastPage дописывает Лист подписей (стрипать нечего).
+	// 3 контентных страницы + 1 Лист = 4.
+	signPage, err := GenerateSignPage([]SignatureInfo{sampleSignature()})
 	require.NoError(t, err)
+	firstSigned, err := ReplaceLastPage(orig.Bytes(), signPage)
+	require.NoError(t, err)
+	firstCount, err := api.PageCount(bytes.NewReader(firstSigned), conf)
+	require.NoError(t, err)
+	require.Equal(t, 4, firstCount)
 
-	res, err := ReplaceLastPage(orig.Bytes(), newPage)
+	// Повторная подпись (как в service.Sign): сначала StripLastPage убирает
+	// старый Лист, затем ReplaceLastPage дописывает новый. Число страниц
+	// должно оставаться стабильным (4), а не расти.
+	stripped, err := StripLastPage(firstSigned)
 	require.NoError(t, err)
+	strippedCount, err := api.PageCount(bytes.NewReader(stripped), conf)
+	require.NoError(t, err)
+	require.Equal(t, 3, strippedCount)
 
-	resCount, err := api.PageCount(bytes.NewReader(res), conf)
+	signPage2, err := GenerateSignPage([]SignatureInfo{sampleSignature(), sampleSignature()})
 	require.NoError(t, err)
-	// original - 1 + 1
-	require.Equal(t, origCount-1+1, resCount)
-	require.Equal(t, 3, resCount)
+	secondSigned, err := ReplaceLastPage(stripped, signPage2)
+	require.NoError(t, err)
+	secondCount, err := api.PageCount(bytes.NewReader(secondSigned), conf)
+	require.NoError(t, err)
+	require.Equal(t, 4, secondCount)
 }
