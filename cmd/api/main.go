@@ -260,6 +260,11 @@ func main() {
 		w.Header().Set("Content-Type", "application/yaml")
 		http.ServeFile(w, req, "docs/openapi.yaml")
 	})
+	// Runbook интеграции для Lovable Edge — публичный, отдаём как markdown.
+	r.Get("/api/docs/integration-lovable.md", func(w http.ResponseWriter, req *http.Request) {
+		w.Header().Set("Content-Type", "text/markdown; charset=utf-8")
+		http.ServeFile(w, req, "docs/integration-lovable.md")
+	})
 
 	// Auth routes — public (no auth required).
 	r.Post("/auth/register", authHandler.HandleRegister)

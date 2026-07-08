@@ -5,12 +5,36 @@ import (
 	"database/sql"
 	"fmt"
 	"log"
+	"mime"
+	"strings"
 
 	"github.com/mkapitanoff/pki-service/internal/reqctx"
 	"github.com/mkapitanoff/pki-service/internal/repository"
 	"github.com/mkapitanoff/pki-service/internal/s3client"
 	"github.com/mkapitanoff/pki-service/internal/storage"
 )
+
+// isAcceptablePDFContentType проверяет Content-Type ответа при скачивании
+// документа. Сравнивает базовый media type без параметров и допускает
+// октет-стрим/пустой заголовок (типично для S3 presigned URL). Финальную
+// достоверность гарантирует проверка PDF-магии (%PDF-) у вызывающего.
+func isAcceptablePDFContentType(ct string) bool {
+	ct = strings.TrimSpace(ct)
+	if ct == "" {
+		return true
+	}
+	mt, _, err := mime.ParseMediaType(ct)
+	if err != nil {
+		// Неразбираемый заголовок — не блокируем, полагаемся на PDF-магию.
+		return true
+	}
+	switch mt {
+	case "application/pdf", "application/octet-stream", "binary/octet-stream":
+		return true
+	default:
+		return false
+	}
+}
 
 // FetchAndCacheDocument downloads a signing session document from the client's
 // S3 via pre-signed URL, verifies it is a PDF, computes its SHA-256, stores it
@@ -42,8 +66,16 @@ func FetchAndCacheDocument(
 		return markFetchFailed(ctx, queries, doc, fmt.Errorf("download: %w", err))
 	}
 
-	if contentType != "application/pdf" {
+	// Content-Type проверяем по базовому media type, игнорируя параметры
+	// (W3C отдаёт "application/pdf; qs=0.001", CDN/S3 — "application/pdf;
+	// charset=binary"). Также принимаем application/octet-stream — частый
+	// дефолт для S3 presigned URL без явного ContentType на объекте, и пустой
+	// заголовок. Достоверность проверяем ниже по PDF-магии (%PDF-).
+	if !isAcceptablePDFContentType(contentType) {
 		return markFetchFailed(ctx, queries, doc, fmt.Errorf("unexpected content-type %q, want application/pdf", contentType))
+	}
+	if len(pdfBytes) < 5 || string(pdfBytes[:5]) != "%PDF-" {
+		return markFetchFailed(ctx, queries, doc, fmt.Errorf("not a PDF: missing %%PDF- header (content-type %q)", contentType))
 	}
 
 	hashHex := ComputeSHA256Hex(pdfBytes)
