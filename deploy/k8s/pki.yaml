@@ -34,7 +34,7 @@ spec:
             - { name: APP_ENV, value: "k8s" }
             # PKI-Verification фиче-флаг (по умолчанию выключен; включаем
             # после деплоя Lovable с server-side hash).
-            - { name: PKI_VERIFICATION_ENABLED, value: "false" }
+            - { name: PKI_VERIFICATION_ENABLED, value: "true" }
           ports:
             - { name: http, containerPort: 8080 }
           readinessProbe:
