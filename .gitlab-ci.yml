@@ -1,0 +1,124 @@
+# GitLab CI/CD — core/pki (ADR-010 §8)
+# PKI отличается от golden-path: docker build вместо ko, golang-migrate вместо goose,
+# несколько бинарей (cmd/api, cmd/worker, cmd/seed).
+# DEPLOY_ENABLED включается после закрытия DEVOPS-65 (Registry) + DEVOPS-71 (Vault JWT).
+
+stages: [lint, test, security, build, sign, deploy]
+
+variables:
+  GO_VERSION: "1.25"
+  VAULT_ADDR: "https://vault.fin4b.kz"
+  IMAGE: "$CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA"
+  DEPLOY_ENABLED: "false"
+
+default:
+  image: golang:1.25
+  tags: [docker]
+  cache:
+    key: ${CI_COMMIT_REF_SLUG}
+    paths: [.gocache, .gomod]
+  before_script:
+    - export GOPATH="$CI_PROJECT_DIR/.gomod" GOCACHE="$CI_PROJECT_DIR/.gocache"
+    - export PATH="$PATH:$CI_PROJECT_DIR/.gomod/bin"
+
+.vault_jwt:
+  id_tokens:
+    VAULT_ID_TOKEN:
+      aud: "$VAULT_ADDR"
+
+lint:
+  stage: lint
+  script:
+    - go install github.com/golangci/golangci-lint/cmd/golangci-lint@v1.64.8
+    - golangci-lint run
+
+test:unit:
+  stage: test
+  script:
+    - go test ./... -race -coverprofile=coverage.out -timeout 60s
+  artifacts:
+    paths: [coverage.out]
+    expire_in: 1 week
+
+test:coverage:
+  stage: test
+  needs: ["test:unit"]
+  script:
+    - |
+      pct=$(go tool cover -func=coverage.out | awk '/^total:/ {gsub(/%/,"",$3); print $3}')
+      echo "coverage: ${pct}% (gate >= 70%)"
+      awk "BEGIN{exit !(${pct} >= 70)}"
+  allow_failure: true
+
+test:migrate:
+  stage: test
+  services:
+    - name: postgres:16-alpine
+      alias: db
+  variables:
+    POSTGRES_DB: pki_test
+    POSTGRES_USER: pki
+    POSTGRES_PASSWORD: pki
+    DATABASE_URL: "postgres://pki:pki@db:5432/pki_test?sslmode=disable"
+  script:
+    - go install github.com/golang-migrate/migrate/v4/cmd/migrate@latest
+    - migrate -path db/migrations -database "$DATABASE_URL" up
+
+security:vuln:
+  stage: security
+  allow_failure: true
+  script:
+    - go install golang.org/x/vuln/cmd/govulncheck@latest
+    - govulncheck ./...
+
+security:sast:
+  stage: security
+  script:
+    - go install github.com/securego/gosec/v2/cmd/gosec@latest
+    - gosec -severity high -exclude-dir=.gomod -exclude-dir=.gocache -exclude-dir=main ./...
+
+security:secret:
+  stage: security
+  image:
+    name: zricethezav/gitleaks:latest
+    entrypoint: [""]
+  before_script: []
+  script:
+    - gitleaks detect --source . --redact --exit-code 1
+
+build:
+  stage: build
+  extends: .vault_jwt
+  image: docker:27
+  services:
+    - docker:27-dind
+  before_script:
+    - echo "$CI_REGISTRY_PASSWORD" | docker login "$CI_REGISTRY" -u "$CI_REGISTRY_USER" --password-stdin
+  script:
+    - export VAULT_TOKEN="$(vault write -field=token auth/jwt/login role=ci-pki jwt=$VAULT_ID_TOKEN)"
+    - docker build -f docker/Dockerfile -t "$IMAGE" .
+    - docker push "$IMAGE"
+  rules:
+    - if: '$DEPLOY_ENABLED == "true" && $CI_COMMIT_BRANCH == "main"'
+
+sign:
+  stage: sign
+  extends: .vault_jwt
+  script:
+    - cosign sign --yes "$IMAGE"
+  rules:
+    - if: '$DEPLOY_ENABLED == "true" && $CI_COMMIT_BRANCH == "main"'
+  allow_failure: true
+
+update-manifests:
+  stage: deploy
+  extends: .vault_jwt
+  script:
+    - export VAULT_TOKEN="$(vault write -field=token auth/jwt/login role=ci-pki jwt=$VAULT_ID_TOKEN)"
+    - export MANIFEST_TOKEN="$(vault kv get -field=token secret/ci/manifest-bot)"
+    - git clone "https://manifest-bot:${MANIFEST_TOKEN}@gitlab.fin4b.kz/platform/gitops-manifests.git"
+    - cd gitops-manifests
+    - yq -i ".image.tag = \"$CI_COMMIT_SHORT_SHA\"" "environments/dev/pki/values.yaml"
+    - 'git commit -am "ci(pki): dev image $CI_COMMIT_SHORT_SHA" && git push'
+  rules:
+    - if: '$DEPLOY_ENABLED == "true" && $CI_COMMIT_BRANCH == "main"'
