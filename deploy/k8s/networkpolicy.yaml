@@ -12,6 +12,19 @@ spec:
     - Ingress
     - Egress
   ingress:
+    # Public entrypoint: Traefik ingress controller (kube-system).
+    # Без этого правила весь внешний HTTP к pki-api (браузер → Traefik → :8080)
+    # дропается политикой → 502 Bad Gateway на /auth, /api, /health, /verify.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: traefik
+      ports:
+        - port: 8080
+          protocol: TCP
     # Internal platform services (IAM, policy, etc.)
     - from:
         - namespaceSelector:
