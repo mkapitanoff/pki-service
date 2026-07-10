@@ -166,6 +166,12 @@ func (h *SignCompleteHandler) HandleComplete(w http.ResponseWriter, r *http.Requ
 		res, err := h.processSig(ctx, session, docID, sig.CMS)
 		if err != nil {
 			failed++
+			// Раньше per-doc причина падения уходила только в тело ответа
+			// (documents[].error) и в stdout не писалась — диагностировать провал
+			// complete по логам Chandra было нельзя. Логируем причину здесь, чтобы
+			// не зависеть от коротких edge-логов клиента.
+			log.Printf("complete.doc_failed request_id=%s session_id=%s doc_id=%s: %v",
+				rid, sessionID, sig.DocID, err)
 			results = append(results, completeDocResponse{DocID: sig.DocID, Status: "error", Error: err.Error()})
 			continue
 		}
