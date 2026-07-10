@@ -67,7 +67,10 @@ spec:
             # Явно фиксируем порт сервера NCANode — иначе Spring читает Service
             # link NCANODE_PORT (URL) и крашится с NumberFormatException.
             - { name: NCANODE_PORT,    value: "14579" }
-            - { name: NCANODE_DEBUG,   value: "false" }
+            # DEBUG=true: с false NCANode не пишет в лог НИЧЕГО. Инцидент
+            # 2026-07-08…10 (залипший пул исходящих соединений) пришлось
+            # диагностировать вслепую, по /proc/net/tcp.
+            - { name: NCANODE_DEBUG,   value: "true" }
             - { name: NCANODE_OCSP_URL, value: "http://ocsp.pki.gov.kz/" }
             - { name: NCANODE_TSP_URL,  value: "http://tsp.pki.gov.kz/" }
             # JVM по умолчанию берёт 25% контейнерной памяти под heap, что
@@ -85,6 +88,39 @@ spec:
             initialDelaySeconds: 30
             periodSeconds: 15
             failureThreshold: 6
+          # Детектор залипания NCANode.
+          #
+          # Инцидент 2026-07-08…10: за ~3 суток аптайма NCANode перестал
+          # закрывать исходящие соединения к серверам НУЦ РК, его пул
+          # исчерпался, и КАЖДЫЙ POST /cms/verify стал висеть >30 с
+          # (`context deadline exceeded` на стороне Chandra). Подписание
+          # встало полностью. Рестарт пода чинит: тот же CMS проверяется
+          # за 1.6 с вместо 90 с.
+          #
+          # Почему не tcpSocket и не `GET /`: на залипшем сервисе порт открыт,
+          # корень отдаёт 200, а POST с пустым телом — быстрый 400 (валидация
+          # идёт до обращения к сети). Ни одна дешёвая проба залипание не видит.
+          # Функциональная проба (реальный POST /cms/verify) потребовала бы
+          # хранить в кластере настоящий CMS с ПДн подписанта — не делаем.
+          #
+          # Считаем ВХОДЯЩИЕ сокеты в CLOSE_WAIT (st=08) на порту 14579
+          # (hex 38F3). Это прямой симптом: клиент отвалился по таймауту, а
+          # NCANode свою сторону не закрыл. На здоровом сервисе их 0–3;
+          # в момент инцидента было 16 и росло с каждым запросом.
+          livenessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - |
+                  n=$(awk 'FNR>1 && $4=="08" && $2 ~ /:38F3$/ {c++} END{print c+0}' \
+                        /proc/net/tcp /proc/net/tcp6 2>/dev/null)
+                  echo "close_wait_inbound=$n"
+                  [ "$n" -lt 10 ]
+            initialDelaySeconds: 120
+            periodSeconds: 60
+            timeoutSeconds: 5
+            failureThreshold: 3
           resources:
             # На VPS NCANode держит ~390Mi steady + jvm heap растёт со временем.
             # 768Mi лимит вызывал OOM при инициализации CRL cache. Ставим 1.5Gi.
