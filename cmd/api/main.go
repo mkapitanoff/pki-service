@@ -266,10 +266,14 @@ func main() {
 		w.Header().Set("Content-Type", "application/yaml")
 		http.ServeFile(w, req, "docs/openapi.yaml")
 	})
-	// Runbook интеграции для Lovable Edge — публичный, отдаём как markdown.
-	r.Get("/api/docs/integration-lovable.md", func(w http.ResponseWriter, req *http.Request) {
+	// Сервис-агностичный контракт интеграции — публичный, отдаём как markdown.
+	r.Get("/api/docs/integration.md", func(w http.ResponseWriter, req *http.Request) {
 		w.Header().Set("Content-Type", "text/markdown; charset=utf-8")
-		http.ServeFile(w, req, "docs/integration-lovable.md")
+		http.ServeFile(w, req, "docs/integration.md")
+	})
+	// Обратная совместимость: старый Lovable-специфичный путь → редирект на генерик.
+	r.Get("/api/docs/integration-lovable.md", func(w http.ResponseWriter, req *http.Request) {
+		http.Redirect(w, req, "/api/docs/integration.md", http.StatusMovedPermanently)
 	})
 
 	// Auth routes — public (no auth required).

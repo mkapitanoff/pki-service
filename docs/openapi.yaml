@@ -1167,6 +1167,8 @@ components:
                   Общие: INVALID_REQUEST, UNAUTHORIZED, FORBIDDEN,
                          PAYLOAD_TOO_LARGE, INTERNAL.
                   Документы: DOCUMENT_NOT_FOUND, DUPLICATE_DOCUMENT_NAME.
+                  Идемпотентность: IDEMPOTENCY_KEY_REUSED (409 — тот же
+                         Idempotency-Key с другим телом запроса).
                   Сессии: SESSION_NOT_FOUND, SESSION_EXPIRED, SESSION_CLOSED.
                   CMS: INVALID_CMS_BASE64, INVALID_CMS_STRUCTURE,
                        HASH_MISMATCH, CMS_INVALID, CERT_REVOKED,
