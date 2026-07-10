@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"fmt"
+	"strings"
 )
 
 // ComputeSHA256Base64 returns the base64-encoded SHA-256 hash of data.
@@ -137,4 +138,84 @@ func ExtractHashFromCMS(cmsBytes []byte) ([]byte, error) {
 	}
 
 	return nil, fmt.Errorf("cms: messageDigest attribute not found in authenticatedAttributes")
+}
+
+// encapContentInfo — EncapsulatedContentInfo из SignedData:
+// SEQUENCE { eContentType OID, [0] EXPLICIT eContent OCTET STRING OPTIONAL }.
+type encapContentInfo struct {
+	EContentType asn1.ObjectIdentifier
+	EContent     asn1.RawValue `asn1:"explicit,tag:0,optional"`
+}
+
+// ExtractSignedContentHash извлекает eContent (ВЛОЖЕННЫЙ подписанный контент)
+// из attached CMS и нормализует его к hex SHA-256.
+//
+// Это корректная привязка «подпись ↔ документ»: eContent — это то, что реально
+// подписал NCALayer (в hash-flow digested:true туда кладётся SHA-256 документа),
+// и оно должно совпадать с content_hash, который Chandra вычислила/приняла.
+// В отличие от messageDigest (см. ExtractHashFromCMS) — тот является хэшем ОТ
+// eContent (напр. Streebog-512 для ГОСТ) и документ-хэшем НЕ является.
+//
+// Возвращает (hashHex, attached, err):
+//   - attached=false, err=nil → detached CMS (eContent отсутствует); привязку в
+//     этом случае обеспечивает NCANode через переданный data (см. VerifyCMS).
+//   - err != nil → структуру не удалось разобрать / eContent не похож на SHA-256.
+func ExtractSignedContentHash(cmsBytes []byte) (hashHex string, attached bool, err error) {
+	content, attached, err := extractSignedContent(cmsBytes)
+	if err != nil {
+		return "", attached, err
+	}
+	if !attached {
+		return "", false, nil
+	}
+	h, nerr := normalizeToSHA256Hex(content)
+	if nerr != nil {
+		return "", true, nerr
+	}
+	return h, true, nil
+}
+
+// extractSignedContent достаёт байты eContent из encapContentInfo.
+func extractSignedContent(cmsBytes []byte) (content []byte, attached bool, err error) {
+	var ci pkcs7ContentInfo
+	if _, err = asn1.Unmarshal(cmsBytes, &ci); err != nil {
+		return nil, false, fmt.Errorf("cms: unmarshal ContentInfo: %w", err)
+	}
+	if len(ci.Content.Bytes) == 0 {
+		return nil, false, fmt.Errorf("cms: ContentInfo has no embedded content")
+	}
+	var sd signedData
+	if _, err = asn1.Unmarshal(ci.Content.Bytes, &sd); err != nil {
+		return nil, false, fmt.Errorf("cms: unmarshal SignedData: %w", err)
+	}
+	var eci encapContentInfo
+	if _, err = asn1.Unmarshal(sd.ContentInfo.FullBytes, &eci); err != nil {
+		return nil, false, fmt.Errorf("cms: unmarshal encapContentInfo: %w", err)
+	}
+	if len(eci.EContent.Bytes) == 0 {
+		return nil, false, nil // detached — eContent отсутствует
+	}
+	var octet []byte
+	if _, err = asn1.Unmarshal(eci.EContent.Bytes, &octet); err != nil {
+		return nil, false, fmt.Errorf("cms: unmarshal eContent OCTET STRING: %w", err)
+	}
+	return octet, true, nil
+}
+
+// normalizeToSHA256Hex приводит eContent к hex SHA-256, поддерживая наблюдаемые
+// формы: сырые 32 байта, hex-ASCII (64 симв.), base64-ASCII (формат NCALayer).
+func normalizeToSHA256Hex(content []byte) (string, error) {
+	if len(content) == sha256.Size {
+		return hex.EncodeToString(content), nil
+	}
+	s := strings.TrimSpace(string(content))
+	if len(s) == 2*sha256.Size {
+		if _, err := hex.DecodeString(s); err == nil {
+			return strings.ToLower(s), nil
+		}
+	}
+	if raw, err := base64.StdEncoding.DecodeString(s); err == nil && len(raw) == sha256.Size {
+		return hex.EncodeToString(raw), nil
+	}
+	return "", fmt.Errorf("cms: eContent is not a recognizable SHA-256 (len=%d)", len(content))
 }

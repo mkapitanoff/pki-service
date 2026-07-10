@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -220,26 +221,31 @@ func (h *SignCompleteHandler) processSig(
 		}
 	}
 
-	// 4. Integrity check: extract messageDigest from CMS, compare to stored content_hash.
+	// 4. Integrity binding: подписанный eContent должен совпадать с хэшем нашего
+	// документа. Это привязка «подпись ↔ именно этот PDF».
+	//
+	// SHADOW-режим: пока НЕ отклоняем — только логируем integrity.match /
+	// integrity.mismatch / integrity.detached / integrity.extract_error. После
+	// подтверждения на реальном трафике (0 ложных mismatch) отдельным шагом
+	// проверка станет fatal (422). Крипто-безопасный поэтапный ввод контроля.
 	if !doc.ContentHash.Valid || doc.ContentHash.String == "" {
 		// На этапе complete content_hash должен быть выставлен либо клиентом
 		// (hash_source='client'), либо фетчером. Если его нет — sanity fail.
 		return nil, fmt.Errorf("document has no content_hash (fetch may not be complete)")
 	}
-	contentHashHex := doc.ContentHash.String
-	cmsDigest, err := signer.ExtractHashFromCMS(cmsBytes)
-	if err != nil {
-		log.Printf("sign_complete: ExtractHashFromCMS doc=%s: %v (skipping integrity check)", doc.ID, err)
-		// Non-fatal: NCANode verification will catch any forgery.
-	} else {
-		storedHashBytes, hexErr := hex.DecodeString(contentHashHex)
-		if hexErr != nil {
-			return nil, fmt.Errorf("stored content_hash is not valid hex")
-		}
-		if !bytesEqual(cmsDigest, storedHashBytes) {
-			w := &hashMismatchError{}
-			return nil, w
-		}
+	contentHashHex := strings.ToLower(doc.ContentHash.String)
+	signedHashHex, attached, exErr := signer.ExtractSignedContentHash(cmsBytes)
+	switch {
+	case exErr != nil:
+		log.Printf("integrity.extract_error doc=%s: %v (shadow, not enforced)", doc.ID, exErr)
+	case !attached:
+		// detached CMS — привязку обеспечивает NCANode через data (шаг 5).
+		log.Printf("integrity.detached doc=%s (binding via ncanode)", doc.ID)
+	case signedHashHex == contentHashHex:
+		log.Printf("integrity.match doc=%s", doc.ID)
+	default:
+		log.Printf("integrity.mismatch doc=%s signed=%s content_hash=%s (shadow, not enforced)",
+			doc.ID, signedHashHex, contentHashHex)
 	}
 
 	// 5. Verify CMS via NCANode.
