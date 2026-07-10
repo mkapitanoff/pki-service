@@ -9,13 +9,15 @@ WHERE tenant_id = $1
   AND expires_at > now();
 
 -- name: PutIdempotencyKey :exec
--- Сохраняет результат обработки. ON CONFLICT DO NOTHING — если две
--- параллельные транзакции дошли сюда, первая выигрывает; вторая запросом
--- GetIdempotencyKey увидит её результат при ретрае.
+-- Сохраняет результат обработки вместе с фингерпринтом тела запроса
+-- (request_hash) — он нужен, чтобы поймать переиспользование ключа с другим
+-- payload. ON CONFLICT DO NOTHING — если две параллельные транзакции дошли
+-- сюда, первая выигрывает; вторая запросом GetIdempotencyKey увидит её
+-- результат при ретрае.
 INSERT INTO idempotency_keys (
-    tenant_id, idem_key, method, path, status_code, response_body, session_id
+    tenant_id, idem_key, method, path, status_code, response_body, session_id, request_hash
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7
+    $1, $2, $3, $4, $5, $6, $7, $8
 )
 ON CONFLICT (tenant_id, idem_key, method, path) DO NOTHING;
 

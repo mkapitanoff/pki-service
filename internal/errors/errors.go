@@ -63,6 +63,11 @@ var (
 	ErrSessionNotFound    = &AppError{Code: "SESSION_NOT_FOUND", Status: 404, Message: "Signing session not found"}
 	ErrDuplicateName      = &AppError{Code: "DUPLICATE_DOCUMENT_NAME", Status: 409, Message: "documents[].name must be unique within a session"}
 	ErrPayloadTooLarge    = &AppError{Code: "PAYLOAD_TOO_LARGE", Status: 413, Message: "Request body exceeds the configured limit"}
+
+	// ErrIdempotencyKeyReused — тот же Idempotency-Key прислан с другим телом
+	// запроса. Молча отдать сохранённый ответ нельзя: клиент получил бы
+	// устаревшие данные (doc_id и хэши прошлой операции) вместо ошибки.
+	ErrIdempotencyKeyReused = &AppError{Code: "IDEMPOTENCY_KEY_REUSED", Status: 409, Message: "Idempotency-Key was already used with a different request body"}
 )
 
 // WithDetails returns a copy of the sentinel carrying machine-readable details

@@ -7,6 +7,7 @@ package repository
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 
 	"github.com/google/uuid"
@@ -22,7 +23,7 @@ func (q *Queries) CleanupExpiredIdempotencyKeys(ctx context.Context) error {
 }
 
 const getIdempotencyKey = `-- name: GetIdempotencyKey :one
-SELECT tenant_id, idem_key, method, path, status_code, response_body, session_id, created_at, expires_at FROM idempotency_keys
+SELECT tenant_id, idem_key, method, path, status_code, response_body, session_id, created_at, expires_at, request_hash FROM idempotency_keys
 WHERE tenant_id = $1
   AND idem_key  = $2
   AND method    = $3
@@ -57,15 +58,16 @@ func (q *Queries) GetIdempotencyKey(ctx context.Context, arg GetIdempotencyKeyPa
 		&i.SessionID,
 		&i.CreatedAt,
 		&i.ExpiresAt,
+		&i.RequestHash,
 	)
 	return i, err
 }
 
 const putIdempotencyKey = `-- name: PutIdempotencyKey :exec
 INSERT INTO idempotency_keys (
-    tenant_id, idem_key, method, path, status_code, response_body, session_id
+    tenant_id, idem_key, method, path, status_code, response_body, session_id, request_hash
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7
+    $1, $2, $3, $4, $5, $6, $7, $8
 )
 ON CONFLICT (tenant_id, idem_key, method, path) DO NOTHING
 `
@@ -78,11 +80,14 @@ type PutIdempotencyKeyParams struct {
 	StatusCode   int32           `json:"status_code"`
 	ResponseBody json.RawMessage `json:"response_body"`
 	SessionID    uuid.NullUUID   `json:"session_id"`
+	RequestHash  sql.NullString  `json:"request_hash"`
 }
 
-// Сохраняет результат обработки. ON CONFLICT DO NOTHING — если две
-// параллельные транзакции дошли сюда, первая выигрывает; вторая запросом
-// GetIdempotencyKey увидит её результат при ретрае.
+// Сохраняет результат обработки вместе с фингерпринтом тела запроса
+// (request_hash) — он нужен, чтобы поймать переиспользование ключа с другим
+// payload. ON CONFLICT DO NOTHING — если две параллельные транзакции дошли
+// сюда, первая выигрывает; вторая запросом GetIdempotencyKey увидит её
+// результат при ретрае.
 func (q *Queries) PutIdempotencyKey(ctx context.Context, arg PutIdempotencyKeyParams) error {
 	_, err := q.db.ExecContext(ctx, putIdempotencyKey,
 		arg.TenantID,
@@ -92,6 +97,7 @@ func (q *Queries) PutIdempotencyKey(ctx context.Context, arg PutIdempotencyKeyPa
 		arg.StatusCode,
 		arg.ResponseBody,
 		arg.SessionID,
+		arg.RequestHash,
 	)
 	return err
 }

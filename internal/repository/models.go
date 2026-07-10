@@ -257,6 +257,7 @@ type IdempotencyKey struct {
 	SessionID    uuid.NullUUID   `json:"session_id"`
 	CreatedAt    time.Time       `json:"created_at"`
 	ExpiresAt    time.Time       `json:"expires_at"`
+	RequestHash  sql.NullString  `json:"request_hash"`
 }
 
 type Signature struct {

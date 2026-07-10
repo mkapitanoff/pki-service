@@ -102,6 +102,15 @@ func (h *SignInitiateHandler) HandleInitiate(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
+	// Сырое тело нужно для фингерпринта Idempotency-Key (сверка «тот же ключ —
+	// то же тело»). Читаем до Decode и восстанавливаем r.Body.
+	rawBody, bodyErr := ReadAndRestoreBody(r)
+	if bodyErr != nil {
+		respondError(w, apperr.ErrInvalidRequest)
+		return
+	}
+	requestHash := HashRequestBody(rawBody)
+
 	var req initiateRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		respondError(w, apperr.ErrInvalidRequest)
@@ -190,11 +199,20 @@ func (h *SignInitiateHandler) HandleInitiate(w http.ResponseWriter, r *http.Requ
 	// 0. Idempotency-Key check: если Lovable повторит /sign/initiate с тем
 	// же ключом (например после сетевого таймаута), отдаём кэшированный
 	// ответ и не создаём дубль сессии.
-	idemKey, cached, idemErr := CheckIdempotency(ctx, h.queries, r, tenantID)
+	idemKey, cached, idemConflict, idemErr := CheckIdempotency(ctx, h.queries, r, tenantID, requestHash)
 	if idemErr != nil {
 		log.Printf("initiate.idem.lookup_failed request_id=%s err=%v", rid, idemErr)
 		// Не прерываем flow — лучше создать сессию ещё раз, чем 5xx по
 		// инфра-ошибке БД на idempotency-таблице.
+	}
+	if idemConflict {
+		// Тот же ключ, другое тело: молча отдать старый ответ нельзя — клиент
+		// получил бы doc_id и хэши прошлой операции. Явная ошибка вместо
+		// устаревших данных.
+		log.Printf("initiate.idem.conflict request_id=%s tenant_id=%s key=%s",
+			rid, tenantID, idemKey)
+		respondErrorReq(w, r, apperr.ErrIdempotencyKeyReused)
+		return
 	}
 	if cached != nil {
 		log.Printf("initiate.idem.replay request_id=%s tenant_id=%s key=%s status=%d",
@@ -357,7 +375,7 @@ func (h *SignInitiateHandler) HandleInitiate(w http.ResponseWriter, r *http.Requ
 		bodyBytes := jsonBytes(body)
 		StoreIdempotency(ctx, h.queries, r, tenantID, idemKey,
 			http.StatusBadGateway, bodyBytes,
-			uuid.NullUUID{UUID: session.ID, Valid: true})
+			uuid.NullUUID{UUID: session.ID, Valid: true}, requestHash)
 		respondJSONReq(w, r, http.StatusBadGateway, body)
 		return
 	}
@@ -373,7 +391,7 @@ func (h *SignInitiateHandler) HandleInitiate(w http.ResponseWriter, r *http.Requ
 	bodyBytes := jsonBytes(body)
 	StoreIdempotency(ctx, h.queries, r, tenantID, idemKey,
 		http.StatusOK, bodyBytes,
-		uuid.NullUUID{UUID: session.ID, Valid: true})
+		uuid.NullUUID{UUID: session.ID, Valid: true}, requestHash)
 	respondJSONReq(w, r, http.StatusOK, body)
 }
 

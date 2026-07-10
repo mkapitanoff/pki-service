@@ -97,9 +97,11 @@ type Querier interface {
 	// Вызывается из /sign/complete после успешной sync-сверки messageDigest.
 	// Первая проверка асинхронным воркером откладывается на InitialDelay секунд.
 	MarkSessionDocumentVerificationPending(ctx context.Context, arg MarkSessionDocumentVerificationPendingParams) error
-	// Сохраняет результат обработки. ON CONFLICT DO NOTHING — если две
-	// параллельные транзакции дошли сюда, первая выигрывает; вторая запросом
-	// GetIdempotencyKey увидит её результат при ретрае.
+	// Сохраняет результат обработки вместе с фингерпринтом тела запроса
+	// (request_hash) — он нужен, чтобы поймать переиспользование ключа с другим
+	// payload. ON CONFLICT DO NOTHING — если две параллельные транзакции дошли
+	// сюда, первая выигрывает; вторая запросом GetIdempotencyKey увидит её
+	// результат при ретрае.
 	PutIdempotencyKey(ctx context.Context, arg PutIdempotencyKeyParams) error
 	// Worst-of агрегат: любой не-'verified' документ перетягивает статус сессии.
 	// Приоритет: mismatch > unavailable > pending > verified. Сессии без verification-

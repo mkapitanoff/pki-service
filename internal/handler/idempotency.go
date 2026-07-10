@@ -1,8 +1,13 @@
 package handler
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
+	"database/sql"
+	"encoding/hex"
 	"encoding/json"
+	"io"
 	"log"
 	"net/http"
 	"strings"
@@ -23,27 +28,64 @@ type idempotentResult struct {
 	Body       []byte
 }
 
+// ReadAndRestoreBody читает тело запроса целиком и восстанавливает r.Body,
+// чтобы последующий json.Decode в handler'е отработал как обычно.
+//
+// Нужен для фингерпринта тела: механизм намеренно работает по СЫРЫМ байтам,
+// без завязки на структуру конкретного эндпоинта — поэтому применим к любому
+// будущему идемпотентному роуту, а не только к /sign/initiate.
+func ReadAndRestoreBody(r *http.Request) ([]byte, error) {
+	if r.Body == nil {
+		return nil, nil
+	}
+	b, err := io.ReadAll(r.Body)
+	if err != nil {
+		return nil, err
+	}
+	_ = r.Body.Close()
+	r.Body = io.NopCloser(bytes.NewReader(b))
+	return b, nil
+}
+
+// HashRequestBody возвращает SHA-256 (hex) сырого тела запроса.
+func HashRequestBody(body []byte) string {
+	sum := sha256.Sum256(body)
+	return hex.EncodeToString(sum[:])
+}
+
 // CheckIdempotency читает Idempotency-Key из запроса и, если ключ есть,
 // ищет ранее сохранённый ответ для (tenant, key, method, path).
 //
-// Возвращает (key, cached). Если cached != nil — caller обязан вернуть тот
-// же status_code и body и НЕ выполнять основной flow. Если cached == nil
-// и key != "" — после успешной обработки вызвать StoreIdempotency.
+// requestHash — SHA-256 сырого тела текущего запроса (см. HashRequestBody).
+// Сверка фингерпринта отличает честный ретрай от переиспользования ключа:
 //
-// Пустой ключ → ничего не делает, key == "" возвращается.
+//	request_hash IS NULL     → legacy-строка (до 000013), реплеим как раньше;
+//	request_hash == текущему → реплей: это тот же самый запрос;
+//	request_hash != текущему → conflict=true, caller обязан вернуть 409.
+//
+// Без этой сверки клиент, собравший ключ из нестабильного базиса, молча
+// получал бы устаревший ответ прошлой операции (чужие doc_id и хэши).
+//
+// Возвращает (key, cached, conflict). Если cached != nil — caller обязан
+// вернуть тот же status_code и body и НЕ выполнять основной flow. Если
+// cached == nil и key != "" — после успешной обработки вызвать StoreIdempotency.
+//
+// Пустой ключ → ничего не делает, key == "" возвращается (клиенты, не
+// присылающие заголовок, не затрагиваются вообще).
 func CheckIdempotency(
 	ctx context.Context,
 	q *repository.Queries,
 	r *http.Request,
 	tenantID uuid.UUID,
-) (key string, cached *idempotentResult, err error) {
+	requestHash string,
+) (key string, cached *idempotentResult, conflict bool, err error) {
 	key = strings.TrimSpace(r.Header.Get(IdempotencyHeader))
 	if key == "" {
-		return "", nil, nil
+		return "", nil, false, nil
 	}
 	if len(key) > 255 {
 		// Защита от злоупотреблений; ключ слишком длинный — игнорируем.
-		return "", nil, nil
+		return "", nil, false, nil
 	}
 	row, qerr := q.GetIdempotencyKey(ctx, repository.GetIdempotencyKeyParams{
 		TenantID: tenantID,
@@ -55,14 +97,17 @@ func CheckIdempotency(
 		// sql.ErrNoRows вернётся как зашитая ошибка → cached остаётся nil.
 		// Любая другая ошибка (timeout, syntax) — пробрасываем.
 		if isNoRows(qerr) {
-			return key, nil, nil
+			return key, nil, false, nil
 		}
-		return key, nil, qerr
+		return key, nil, false, qerr
+	}
+	if row.RequestHash.Valid && requestHash != "" && row.RequestHash.String != requestHash {
+		return key, nil, true, nil
 	}
 	return key, &idempotentResult{
 		StatusCode: int(row.StatusCode),
 		Body:       []byte(row.ResponseBody),
-	}, nil
+	}, false, nil
 }
 
 // StoreIdempotency сохраняет результат запроса (response body, status code).
@@ -79,6 +124,7 @@ func StoreIdempotency(
 	statusCode int,
 	body []byte,
 	sessionID uuid.NullUUID,
+	requestHash string,
 ) {
 	if key == "" {
 		return
@@ -91,6 +137,7 @@ func StoreIdempotency(
 		StatusCode:   int32(statusCode),
 		ResponseBody: json.RawMessage(body),
 		SessionID:    sessionID,
+		RequestHash:  sql.NullString{String: requestHash, Valid: requestHash != ""},
 	}); err != nil {
 		log.Printf("idempotency.put request_id=%s tenant_id=%s key=%s err=%v",
 			reqctx.RequestID(ctx), tenantID, key, err)
