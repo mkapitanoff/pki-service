@@ -57,7 +57,11 @@ var verifyTmpl = template.Must(template.New("v").Parse(`<!DOCTYPE html>
 <body>
 <h1><span style="color:green">✓</span> ДОКУМЕНТ ПОДПИСАН ЭЦП</h1>
 <table>
+<!-- Дата подписания временно скрыта на verify-странице (конфликты между
+     бухгалтерией и подписантами по трактовке даты). Данные (.SignedAt)
+     не удаляются — раскомментировать строку ниже, когда вопрос будет снят.
 <tr><td>Дата подписания:</td><td>{{.SignedAt}}</td></tr>
+-->
 <tr><td>Организация:</td><td>{{.OrgName}}</td></tr>
 <tr><td>БИН:</td><td>{{.SignerBin}}</td></tr>
 <tr><td>Подписант:</td><td>{{.SignerName}}</td></tr>
@@ -146,11 +150,14 @@ func (h *VerifyHandler) HandleVerify(w http.ResponseWriter, r *http.Request) {
 // сразу после NCANode-верификации — см. internal/handler/sign_complete.go.
 func (h *VerifyHandler) renderSessionDocVerify(w http.ResponseWriter, r *http.Request, docID uuid.UUID) {
 	doc, err := h.queries.GetSigningSessionDocument(r.Context(), docID)
-	// "signed" — подпись принята, PDF собран; "uploaded" — тот же документ,
-	// но уже отправлен в S3 клиента (следующий шаг после signed). Оба
-	// означают успешно подписан. SignerName.Valid — реальный гейт наличия
-	// signer/cert-данных (записанных в /sign/complete).
-	if err != nil || (doc.Status != "signed" && doc.Status != "uploaded") || !doc.SignerName.Valid {
+	// "signed" — подпись криптографически принята, артефакт ещё собирается в
+	// фоне; "uploading" — тот же фон в процессе (QR-штамп/Лист подписей/выгрузка,
+	// см. internal/postprocess); "uploaded" — уже отправлен в S3 клиента. Все три
+	// означают успешно подписан — verify-страница не должна зависеть от того,
+	// готов ли скачиваемый PDF. SignerName.Valid — реальный гейт наличия
+	// signer/cert-данных (записанных в /sign/complete синхронно, до постановки
+	// в очередь постпроцессинга).
+	if err != nil || (doc.Status != "signed" && doc.Status != "uploading" && doc.Status != "uploaded") || !doc.SignerName.Valid {
 		w.WriteHeader(http.StatusNotFound)
 		_ = notFoundTmpl.Execute(w, nil)
 		return

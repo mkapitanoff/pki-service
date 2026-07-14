@@ -355,7 +355,11 @@ func GenerateSignPage(signatures []SignatureInfo) ([]byte, error) {
 
 		pdf.SetX(textX)
 		setFont(9, false)
-		pdf.CellFormat(textW, 5, fmt.Sprintf("Дата подписания:  %s", formatTS(s.SignedAt)), "", 1, "L", false, 0, "")
+		// Дата подписания временно скрыта на Листе подписей (конфликты между
+		// бухгалтерией и подписантами по трактовке даты). Данные (s.SignedAt)
+		// не удаляются — просто не рендерим строку. Раскомментировать, когда
+		// вопрос будет снят.
+		// pdf.CellFormat(textW, 5, fmt.Sprintf("Дата подписания:  %s", formatTS(s.SignedAt)), "", 1, "L", false, 0, "")
 		pdf.Ln(2)
 
 		// ── Signer fields ───────────────────────────────────────
