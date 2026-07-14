@@ -48,8 +48,13 @@ spec:
             periodSeconds: 30
             failureThreshold: 5
           resources:
-            requests: { cpu: "100m", memory: "128Mi" }
-            limits:   { cpu: "500m", memory: "512Mi" }
+            # 512Mi лимит вызывал OOMKilled на постобработке тяжёлых
+            # многостраничных PDF (PostprocessWorker держит в памяти
+            # несколько полных копий буфера PDF: оригинал → проштампованный
+            # → Лист подписей → merge). Подняли до 2Gi после инцидента
+            # на 40+ МБ документе. См. план: synthetic-launching-blanket.md.
+            requests: { cpu: "100m", memory: "256Mi" }
+            limits:   { cpu: "1",    memory: "2Gi" }
           volumeMounts:
             - name: app-config
               mountPath: /app/configs/config.k8s.yaml
