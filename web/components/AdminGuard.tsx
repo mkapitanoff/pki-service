@@ -29,7 +29,7 @@ export default function AdminGuard({ children }: { children: React.ReactNode }) 
   if (!checked) {
     return (
       <div className="min-h-[60vh] flex items-center justify-center">
-        <Loader2 className="w-8 h-8 text-[#0070f3] animate-spin" />
+        <Loader2 className="w-8 h-8 text-primary animate-spin" />
       </div>
     );
   }

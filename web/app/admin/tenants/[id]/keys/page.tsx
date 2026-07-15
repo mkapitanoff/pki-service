@@ -39,11 +39,11 @@ function KeyRow({
   };
 
   return (
-    <div className="flex items-center justify-between py-3 border-b border-zinc-100 last:border-0">
+    <div className="flex items-center justify-between py-3 border-b border-border/50 last:border-0">
       <div>
-        <p className="font-medium text-zinc-900">{apiKey.label}</p>
-        <p className="text-xs text-zinc-400 font-mono mt-0.5">{apiKey.id}</p>
-        <p className="text-xs text-zinc-400 mt-0.5">
+        <p className="font-medium text-foreground">{apiKey.label}</p>
+        <p className="text-xs text-muted-foreground font-mono mt-0.5">{apiKey.id}</p>
+        <p className="text-xs text-muted-foreground mt-0.5">
           Истекает: {fmtDate(apiKey.expires_at)}
         </p>
       </div>
@@ -51,8 +51,8 @@ function KeyRow({
         <span
           className={`text-xs font-medium px-2 py-0.5 rounded-full ${
             apiKey.is_active
-              ? "bg-green-50 text-green-700"
-              : "bg-zinc-100 text-zinc-400"
+              ? "bg-success/15 text-success"
+              : "bg-muted text-muted-foreground"
           }`}
         >
           {apiKey.is_active ? "Активен" : "Неактивен"}
@@ -61,7 +61,7 @@ function KeyRow({
           <button
             onClick={handleDeactivate}
             disabled={loading}
-            className="text-zinc-400 hover:text-[#d63031] transition-colors"
+            className="text-muted-foreground hover:text-destructive transition-colors"
             title="Деактивировать"
           >
             {loading ? (
@@ -123,18 +123,18 @@ function NewKeyModal({
   if (createdKey) {
     return (
       <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
-        <div className="bg-white rounded-2xl border border-zinc-200 p-6 w-full max-w-md space-y-4">
-          <h2 className="text-lg font-semibold text-zinc-900">Ключ создан</h2>
-          <p className="text-sm text-zinc-600">
+        <div className="bg-card rounded-lg border border-border p-6 w-full max-w-md space-y-4">
+          <h2 className="text-lg font-semibold text-foreground">Ключ создан</h2>
+          <p className="text-sm text-muted-foreground">
             Сохраните ключ — он отображается только один раз.
           </p>
-          <div className="bg-zinc-50 border border-zinc-200 rounded-lg p-3 flex items-center gap-2">
-            <code className="text-xs font-mono break-all flex-1 text-zinc-800">
+          <div className="bg-muted border border-border rounded-lg p-3 flex items-center gap-2">
+            <code className="text-xs font-mono break-all flex-1 text-foreground">
               {createdKey}
             </code>
-            <button onClick={handleCopy} className="shrink-0 text-zinc-400 hover:text-zinc-700">
+            <button onClick={handleCopy} className="shrink-0 text-muted-foreground hover:text-foreground">
               {copied ? (
-                <CheckCheck className="w-4 h-4 text-green-600" />
+                <CheckCheck className="w-4 h-4 text-success" />
               ) : (
                 <Copy className="w-4 h-4" />
               )}
@@ -143,7 +143,7 @@ function NewKeyModal({
           <div className="flex justify-end">
             <button
               onClick={onClose}
-              className="px-4 py-2 text-sm bg-[#0070f3] text-white rounded-lg hover:bg-[#005dd4]"
+              className="px-4 py-2 text-sm bg-primary text-primary-foreground rounded-lg hover:opacity-90"
             >
               Закрыть
             </button>
@@ -155,13 +155,13 @@ function NewKeyModal({
 
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-2xl border border-zinc-200 p-6 w-full max-w-md space-y-4">
-        <h2 className="text-lg font-semibold text-zinc-900">Новый API-ключ</h2>
+      <div className="bg-card rounded-lg border border-border p-6 w-full max-w-md space-y-4">
+        <h2 className="text-lg font-semibold text-foreground">Новый API-ключ</h2>
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label className="block text-sm text-zinc-600 mb-1">Метка</label>
+            <label className="block text-sm text-muted-foreground mb-1">Метка</label>
             <input
-              className="w-full border border-zinc-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[#0070f3]"
+              className="w-full border border-input rounded-lg px-3 py-2 text-sm bg-background focus:outline-none focus:border-primary"
               value={label}
               onChange={(e) => setLabel(e.target.value)}
               placeholder="Production key"
@@ -169,18 +169,18 @@ function NewKeyModal({
             />
           </div>
           <div>
-            <label className="block text-sm text-zinc-600 mb-1">
+            <label className="block text-sm text-muted-foreground mb-1">
               Истекает (необязательно)
             </label>
             <input
               type="datetime-local"
-              className="w-full border border-zinc-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[#0070f3]"
+              className="w-full border border-input rounded-lg px-3 py-2 text-sm bg-background focus:outline-none focus:border-primary"
               value={expiresAt}
               onChange={(e) => setExpiresAt(e.target.value)}
             />
           </div>
           {error && (
-            <p className="text-sm text-[#d63031] flex items-center gap-1">
+            <p className="text-sm text-destructive flex items-center gap-1">
               <AlertCircle className="w-4 h-4" /> {error}
             </p>
           )}
@@ -188,14 +188,14 @@ function NewKeyModal({
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2 text-sm text-zinc-600 border border-zinc-300 rounded-lg hover:border-zinc-400"
+              className="px-4 py-2 text-sm text-muted-foreground border border-zinc-300 rounded-lg hover:border-zinc-400"
             >
               Отмена
             </button>
             <button
               type="submit"
               disabled={loading}
-              className="px-4 py-2 text-sm bg-[#0070f3] text-white rounded-lg hover:bg-[#005dd4] disabled:opacity-60 flex items-center gap-2"
+              className="px-4 py-2 text-sm bg-primary text-primary-foreground rounded-lg hover:opacity-90 disabled:opacity-60 flex items-center gap-2"
             >
               {loading && <Loader2 className="w-4 h-4 animate-spin" />}
               Создать
@@ -227,35 +227,35 @@ function KeysPage({ tenantId }: { tenantId: string }) {
   }, [load]);
 
   return (
-    <main className="min-h-screen bg-zinc-50 py-10 px-4">
+    <main className="min-h-screen bg-background py-10 px-4">
       <div className="max-w-3xl mx-auto space-y-6">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
             <Link
               href="/admin/tenants"
-              className="text-zinc-400 hover:text-zinc-700 transition-colors"
+              className="text-muted-foreground hover:text-foreground transition-colors"
             >
               <ArrowLeft className="w-5 h-5" />
             </Link>
-            <h1 className="text-xl font-bold text-zinc-900">API-ключи</h1>
-            <span className="text-xs text-zinc-400 font-mono">{tenantId}</span>
+            <h1 className="text-xl font-bold text-foreground">API-ключи</h1>
+            <span className="text-xs text-muted-foreground font-mono">{tenantId}</span>
           </div>
           <button
             onClick={() => setShowModal(true)}
-            className="flex items-center gap-2 px-4 py-2 bg-[#0070f3] text-white text-sm font-medium rounded-lg hover:bg-[#005dd4]"
+            className="flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground text-sm font-medium rounded-lg hover:opacity-90"
           >
             <Plus className="w-4 h-4" />
             Создать ключ
           </button>
         </div>
 
-        <div className="bg-white border border-zinc-200 rounded-2xl px-6">
+        <div className="bg-card border border-border rounded-lg px-6">
           {loading ? (
             <div className="py-10 flex justify-center">
-              <Loader2 className="w-6 h-6 text-[#0070f3] animate-spin" />
+              <Loader2 className="w-6 h-6 text-primary animate-spin" />
             </div>
           ) : keys.length === 0 ? (
-            <p className="py-10 text-center text-zinc-400 text-sm">Нет ключей</p>
+            <p className="py-10 text-center text-muted-foreground text-sm">Нет ключей</p>
           ) : (
             keys.map((k) => (
               <KeyRow

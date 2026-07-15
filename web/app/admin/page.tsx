@@ -6,46 +6,52 @@ import AdminGuard from "@/components/AdminGuard";
 
 function AdminHome() {
   return (
-    <main className="min-h-screen bg-zinc-50 py-10 px-4">
+    <main className="min-h-screen bg-background py-10 px-4">
       <div className="max-w-2xl mx-auto space-y-6">
-        <h1 className="text-2xl font-bold text-zinc-900">Панель администратора</h1>
+        <h1 className="text-2xl font-bold text-foreground">Панель администратора</h1>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <Link
             href="/admin/tenants"
-            className="bg-white border border-zinc-200 rounded-2xl p-6 hover:border-[#0070f3] transition-colors group"
+            className="bg-card border border-border rounded-lg p-6 hover:border-primary/30 transition-colors group"
           >
-            <Building2 className="w-8 h-8 text-[#0070f3] mb-3" />
-            <h2 className="text-lg font-semibold text-zinc-900 group-hover:text-[#0070f3]">
+            <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center mb-3">
+              <Building2 className="w-5 h-5 text-primary" />
+            </div>
+            <h2 className="text-lg font-semibold text-foreground">
               Тенанты
             </h2>
-            <p className="text-sm text-zinc-500 mt-1">
+            <p className="text-sm text-muted-foreground mt-1">
               Управление организациями и API-ключами
             </p>
           </Link>
 
           <Link
             href="/admin/users"
-            className="bg-white border border-zinc-200 rounded-2xl p-6 hover:border-[#0070f3] transition-colors group"
+            className="bg-card border border-border rounded-lg p-6 hover:border-primary/30 transition-colors group"
           >
-            <Users className="w-8 h-8 text-[#0070f3] mb-3" />
-            <h2 className="text-lg font-semibold text-zinc-900 group-hover:text-[#0070f3]">
+            <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center mb-3">
+              <Users className="w-5 h-5 text-primary" />
+            </div>
+            <h2 className="text-lg font-semibold text-foreground">
               Пользователи
             </h2>
-            <p className="text-sm text-zinc-500 mt-1">
+            <p className="text-sm text-muted-foreground mt-1">
               Управление ролями и активацией аккаунтов
             </p>
           </Link>
 
           <Link
             href="/admin/registry"
-            className="bg-white border border-zinc-200 rounded-2xl p-6 hover:border-[#0070f3] transition-colors group"
+            className="bg-card border border-border rounded-lg p-6 hover:border-primary/30 transition-colors group"
           >
-            <ClipboardList className="w-8 h-8 text-[#0070f3] mb-3" />
-            <h2 className="text-lg font-semibold text-zinc-900 group-hover:text-[#0070f3]">
+            <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center mb-3">
+              <ClipboardList className="w-5 h-5 text-primary" />
+            </div>
+            <h2 className="text-lg font-semibold text-foreground">
               Реестр подписаний
             </h2>
-            <p className="text-sm text-zinc-500 mt-1">
+            <p className="text-sm text-muted-foreground mt-1">
               Отслеживание запросов, скачивание и верификация документов
             </p>
           </Link>

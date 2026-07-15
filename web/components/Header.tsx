@@ -51,8 +51,8 @@ export default function Header() {
   };
 
   return (
-    <header className="bg-white border-b border-zinc-200 px-4 py-3 flex items-center justify-between shrink-0">
-      <Link href="/" className="font-bold text-zinc-900 text-base tracking-tight">
+    <header className="bg-card border-b border-border px-4 py-3 flex items-center justify-between shrink-0">
+      <Link href="/" className="font-bold text-foreground text-base tracking-tight">
         PKI Сервис
       </Link>
 
@@ -60,16 +60,16 @@ export default function Header() {
         {ready && (
           user ? (
             <>
-              <span className="text-sm text-zinc-600 hidden sm:block">
+              <span className="text-sm text-muted-foreground hidden sm:block">
                 {user.name}
               </span>
-              <span className="text-xs text-zinc-400 font-medium bg-zinc-100 px-2 py-0.5 rounded-full hidden sm:block">
+              <span className="text-xs text-muted-foreground font-medium bg-muted px-2 py-0.5 rounded-full hidden sm:block">
                 {user.role}
               </span>
               {user.role === "admin" && (
                 <Link
                   href="/admin"
-                  className="flex items-center gap-1.5 text-sm text-[#0070f3] hover:underline"
+                  className="flex items-center gap-1.5 text-sm text-primary hover:underline"
                 >
                   <ShieldCheck className="w-4 h-4" />
                   <span className="hidden sm:inline">Админ</span>
@@ -77,7 +77,7 @@ export default function Header() {
               )}
               <button
                 onClick={handleLogout}
-                className="flex items-center gap-1.5 text-sm text-zinc-500 hover:text-[#d63031] transition-colors"
+                className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-destructive transition-colors"
               >
                 <LogOut className="w-4 h-4" />
                 <span className="hidden sm:inline">Выйти</span>
@@ -86,7 +86,7 @@ export default function Header() {
           ) : (
             <Link
               href="/login"
-              className="flex items-center gap-1.5 text-sm text-[#0070f3] hover:underline"
+              className="flex items-center gap-1.5 text-sm text-primary hover:underline"
             >
               <LogIn className="w-4 h-4" />
               Войти

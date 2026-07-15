@@ -1,7 +1,12 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import { AlertCircle, ClipboardList, Download, ExternalLink } from 'lucide-react'
 import AdminGuard from '@/components/AdminGuard'
+import { Card, CardContent } from '@/components/ui/card'
+import { Badge, type BadgeTone } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { Skeleton } from '@/components/ui/skeleton'
 import {
   adminListRegistry,
   adminDownloadRegistryDocument,
@@ -21,6 +26,31 @@ const STATUS_LABEL: Record<string, string> = {
   upload_failed: 'Ошибка загрузки',
 }
 
+const STATUS_TONE: Record<string, BadgeTone> = {
+  pending: 'muted',
+  ready: 'muted',
+  signing: 'warning',
+  signed: 'success',
+  uploading: 'warning',
+  uploaded: 'success',
+  fetch_failed: 'destructive',
+  upload_failed: 'destructive',
+}
+
+function StatusBadge({ status }: { status: string }) {
+  return (
+    <Badge tone={STATUS_TONE[status] ?? 'muted'}>
+      {(STATUS_LABEL[status] ?? status).toUpperCase()}
+    </Badge>
+  )
+}
+
+function VerificationTag({ status }: { status: string }) {
+  const tone: BadgeTone =
+    status === 'verified' ? 'success' : status === 'mismatch' ? 'destructive' : 'muted'
+  return <Badge tone={tone}>{status.toUpperCase()}</Badge>
+}
+
 function RegistryHome() {
   const [documents, setDocuments] = useState<RegistryDocument[]>([])
   const [total, setTotal] = useState(0)
@@ -38,6 +68,7 @@ function RegistryHome() {
   async function load() {
     try {
       setLoading(true)
+      setError('')
       const data = await adminListRegistry({
         status: statusFilter || undefined,
         limit: PAGE_SIZE,
@@ -75,11 +106,16 @@ function RegistryHome() {
   const pageEnd = Math.min(offset + PAGE_SIZE, total)
 
   return (
-    <div className="p-8 max-w-6xl mx-auto">
-      <div className="flex justify-between items-center mb-6">
-        <h1 className="text-2xl font-bold">Реестр подписаний</h1>
+    <div className="max-w-6xl mx-auto p-6 sm:p-8 space-y-4">
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold text-foreground">Реестр подписаний</h1>
+          <p className="text-sm text-muted-foreground mt-1">
+            Всего: {total}
+          </p>
+        </div>
         <select
-          className="border rounded px-3 py-2"
+          className="border border-border rounded-md px-3 py-2 text-sm bg-card text-foreground"
           value={statusFilter}
           onChange={(e) => {
             setStatusFilter(e.target.value)
@@ -93,106 +129,122 @@ function RegistryHome() {
         </select>
       </div>
 
-      {error && <div className="bg-red-50 text-red-600 p-3 rounded mb-4">{error}</div>}
+      {error && (
+        <Card className="border-destructive/30">
+          <CardContent className="pt-6 flex items-center gap-2 text-destructive text-sm">
+            <AlertCircle className="h-4 w-4 shrink-0" />
+            {error}
+          </CardContent>
+        </Card>
+      )}
 
-      <div className="bg-white rounded-lg border overflow-hidden">
-        <table className="w-full">
-          <thead className="bg-gray-50">
-            <tr>
-              <th className="text-left p-4 font-medium">Документ</th>
-              <th className="text-left p-4 font-medium">Заявка</th>
-              <th className="text-left p-4 font-medium">Подписант</th>
-              <th className="text-left p-4 font-medium">Статус</th>
-              <th className="text-left p-4 font-medium">Подписан</th>
-              <th className="text-left p-4 font-medium">Целостность</th>
-              <th className="text-left p-4 font-medium">Действия</th>
-            </tr>
-          </thead>
-          <tbody>
-            {documents.map((d) => (
-              <tr key={d.id} className="border-t">
-                <td className="p-4 max-w-xs truncate" title={d.document_name}>{d.document_name}</td>
-                <td className="p-4 text-sm text-gray-500">
-                  {d.application_id?.Valid ? d.application_id.String : '—'}
-                </td>
-                <td className="p-4 text-sm">
-                  {d.signer_name?.Valid ? d.signer_name.String : '—'}
-                  {d.org_name?.Valid && (
-                    <div className="text-xs text-gray-500">{d.org_name.String}</div>
-                  )}
-                </td>
-                <td className="p-4">
-                  <span className="px-2 py-1 rounded text-xs bg-gray-100 text-gray-700">
-                    {STATUS_LABEL[d.status] ?? d.status}
-                  </span>
-                </td>
-                <td className="p-4 text-sm text-gray-500">
-                  {d.signed_at?.Valid ? new Date(d.signed_at.Time).toLocaleString('ru-RU') : '—'}
-                </td>
-                <td className="p-4 text-sm">
-                  {d.verification_status?.Valid ? (
-                    <span
-                      className={
-                        d.verification_status.String === 'verified'
-                          ? 'text-green-600'
-                          : d.verification_status.String === 'mismatch'
-                            ? 'text-red-600 font-semibold'
-                            : 'text-gray-500'
-                      }
-                    >
-                      {d.verification_status.String}
-                    </span>
-                  ) : (
-                    '—'
-                  )}
-                </td>
-                <td className="p-4 space-x-3 whitespace-nowrap">
-                  {d.status === 'signed' || d.status === 'uploaded' ? (
-                    <button
-                      onClick={() => handleDownload(d)}
-                      disabled={downloadingId === d.id}
-                      className="text-blue-600 hover:underline text-sm disabled:opacity-50"
-                    >
-                      {downloadingId === d.id ? 'Скачивание…' : 'Скачать'}
-                    </button>
-                  ) : null}
-                  <a
-                    href={`/verify/${d.id}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-blue-600 hover:underline text-sm"
-                  >
-                    Verify
-                  </a>
-                </td>
+      <Card className="overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full data-table">
+            <thead>
+              <tr>
+                <th>Документ</th>
+                <th>Заявка</th>
+                <th>Подписант</th>
+                <th>Статус</th>
+                <th>Подписан</th>
+                <th>Целостность</th>
+                <th>Действия</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {loading &&
+                Array.from({ length: 8 }).map((_, i) => (
+                  <tr key={i}>
+                    <td colSpan={7} className="py-3 px-4">
+                      <Skeleton className="h-5 w-full" />
+                    </td>
+                  </tr>
+                ))}
+              {!loading &&
+                documents.map((d) => (
+                  <tr key={d.id}>
+                    <td className="max-w-xs truncate" title={d.document_name}>
+                      {d.document_name}
+                    </td>
+                    <td className="text-sm text-muted-foreground">
+                      {d.application_id?.Valid ? d.application_id.String : '—'}
+                    </td>
+                    <td className="text-sm">
+                      {d.signer_name?.Valid ? d.signer_name.String : '—'}
+                      {d.org_name?.Valid && (
+                        <div className="text-xs text-muted-foreground">{d.org_name.String}</div>
+                      )}
+                    </td>
+                    <td><StatusBadge status={d.status} /></td>
+                    <td className="text-sm text-muted-foreground">
+                      {d.signed_at?.Valid ? new Date(d.signed_at.Time).toLocaleString('ru-RU') : '—'}
+                    </td>
+                    <td className="text-sm">
+                      {d.verification_status?.Valid ? (
+                        <VerificationTag status={d.verification_status.String} />
+                      ) : (
+                        '—'
+                      )}
+                    </td>
+                    <td className="whitespace-nowrap">
+                      <div className="flex items-center gap-3">
+                        {(d.status === 'signed' || d.status === 'uploaded') && (
+                          <button
+                            onClick={() => handleDownload(d)}
+                            disabled={downloadingId === d.id}
+                            className="inline-flex items-center gap-1 text-primary hover:underline font-medium text-sm disabled:opacity-50"
+                          >
+                            <Download className="h-3.5 w-3.5" />
+                            {downloadingId === d.id ? 'Скачивание…' : 'Скачать'}
+                          </button>
+                        )}
+                        <a
+                          href={`/verify/${d.id}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1 text-primary hover:underline font-medium text-sm"
+                        >
+                          <ExternalLink className="h-3.5 w-3.5" />
+                          Verify
+                        </a>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+            </tbody>
+          </table>
+        </div>
         {!loading && documents.length === 0 && (
-          <div className="p-8 text-center text-gray-500">Документов нет</div>
+          <div className="py-12 text-center">
+            <ClipboardList className="h-12 w-12 mx-auto mb-3 opacity-50 text-muted-foreground" />
+            <p className="text-sm text-muted-foreground max-w-md mx-auto">
+              Документов с таким фильтром не найдено
+            </p>
+          </div>
         )}
-        {loading && <div className="p-8 text-center text-gray-500">Загрузка...</div>}
-      </div>
+      </Card>
 
       {total > 0 && (
-        <div className="flex justify-between items-center mt-4 text-sm text-gray-500">
+        <div className="flex justify-between items-center text-sm text-muted-foreground">
           <span>{pageStart}–{pageEnd} из {total}</span>
-          <div className="space-x-2">
-            <button
+          <div className="flex gap-2">
+            <Button
+              variant="outline"
+              size="sm"
               onClick={() => setOffset(Math.max(0, offset - PAGE_SIZE))}
               disabled={offset === 0}
-              className="border px-3 py-1 rounded disabled:opacity-50"
             >
               Назад
-            </button>
-            <button
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
               onClick={() => setOffset(offset + PAGE_SIZE)}
               disabled={offset + PAGE_SIZE >= total}
-              className="border px-3 py-1 rounded disabled:opacity-50"
             >
               Вперёд
-            </button>
+            </Button>
           </div>
         </div>
       )}

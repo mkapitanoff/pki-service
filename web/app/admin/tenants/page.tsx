@@ -61,54 +61,54 @@ export default function TenantsPage() {
         <h1 className="text-2xl font-bold">Тенанты</h1>
         <button
           onClick={() => setShowCreate(true)}
-          className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700"
+          className="bg-primary text-primary-foreground px-4 py-2 rounded-lg hover:opacity-90"
         >
           + Создать тенанта
         </button>
       </div>
 
-      {error && <div className="bg-red-50 text-red-600 p-3 rounded mb-4">{error}</div>}
+      {error && <div className="bg-destructive/10 text-destructive p-3 rounded mb-4">{error}</div>}
 
       {showCreate && (
-        <div className="bg-white border rounded-lg p-6 mb-6">
-          <h2 className="font-semibold mb-4">Новый тенант</h2>
+        <div className="bg-card border border-border rounded-lg p-6 mb-6">
+          <h2 className="font-semibold mb-4 text-foreground">Новый тенант</h2>
           <input
-            className="border rounded px-3 py-2 w-full mb-3"
+            className="border border-input rounded px-3 py-2 w-full mb-3 bg-background focus:outline-none focus:border-primary"
             placeholder="Название"
             value={newName}
             onChange={e => setNewName(e.target.value)}
           />
           <div className="flex gap-2">
-            <button onClick={createTenant} className="bg-blue-600 text-white px-4 py-2 rounded">Создать</button>
-            <button onClick={() => setShowCreate(false)} className="border px-4 py-2 rounded">Отмена</button>
+            <button onClick={createTenant} className="bg-primary text-primary-foreground px-4 py-2 rounded hover:opacity-90">Создать</button>
+            <button onClick={() => setShowCreate(false)} className="border border-border px-4 py-2 rounded text-muted-foreground">Отмена</button>
           </div>
         </div>
       )}
 
-      <div className="bg-white rounded-lg border overflow-hidden">
-        <table className="w-full">
-          <thead className="bg-gray-50">
+      <div className="bg-card rounded-lg border border-border overflow-hidden">
+        <table className="w-full data-table">
+          <thead>
             <tr>
-              <th className="text-left p-4 font-medium">Название</th>
-              <th className="text-left p-4 font-medium">Статус</th>
-              <th className="text-left p-4 font-medium">API ключей</th>
-              <th className="text-left p-4 font-medium">Действия</th>
+              <th>Название</th>
+              <th>Статус</th>
+              <th>API ключей</th>
+              <th>Действия</th>
             </tr>
           </thead>
           <tbody>
             {tenants.map(t => (
-              <tr key={t.id} className="border-t">
-                <td className="p-4">{t.name}</td>
-                <td className="p-4">
-                  <span className={`px-2 py-1 rounded text-sm ${t.is_active ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
+              <tr key={t.id}>
+                <td>{t.name}</td>
+                <td>
+                  <span className={`px-2.5 py-1 rounded-full text-xs font-medium ${t.is_active ? 'bg-success/15 text-success' : 'bg-muted text-muted-foreground'}`}>
                     {t.is_active ? 'Активен' : 'Неактивен'}
                   </span>
                 </td>
-                <td className="p-4">{t.api_keys_count}</td>
-                <td className="p-4">
+                <td>{t.api_keys_count}</td>
+                <td>
                   <button
                     onClick={() => router.push(`/admin/tenants/${t.id}/keys`)}
-                    className="text-blue-600 hover:underline text-sm"
+                    className="text-primary hover:underline font-medium text-sm"
                   >
                     Ключи
                   </button>
@@ -118,7 +118,7 @@ export default function TenantsPage() {
           </tbody>
         </table>
         {tenants.length === 0 && (
-          <div className="p-8 text-center text-gray-500">Тенантов нет</div>
+          <div className="p-8 text-center text-muted-foreground">Тенантов нет</div>
         )}
       </div>
     </div>

@@ -128,24 +128,24 @@ export default function UsersPage() {
         <h1 className="text-2xl font-bold">Пользователи</h1>
         <button
           onClick={() => setShowCreate(true)}
-          className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700"
+          className="bg-primary text-primary-foreground px-4 py-2 rounded-lg hover:opacity-90"
         >
           + Добавить
         </button>
       </div>
 
-      {error && <div className="bg-red-50 text-red-600 p-3 rounded mb-4">{error}</div>}
+      {error && <div className="bg-destructive/10 text-destructive p-3 rounded mb-4">{error}</div>}
 
       {/* Create modal */}
       {showCreate && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl border border-zinc-200 p-6 w-full max-w-md space-y-4">
+          <div className="bg-card rounded-lg border border-border p-6 w-full max-w-md space-y-4">
             <h2 className="text-lg font-semibold">Новый пользователь</h2>
             <form onSubmit={handleCreate} className="space-y-3">
               <div>
-                <label className="block text-sm text-zinc-600 mb-1">Имя</label>
+                <label className="block text-sm text-muted-foreground mb-1">Имя</label>
                 <input
-                  className="w-full border border-zinc-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500"
+                  className="w-full border border-input rounded-lg px-3 py-2 text-sm bg-background focus:outline-none focus:border-primary"
                   value={newName}
                   onChange={e => setNewName(e.target.value)}
                   placeholder="Иван Иванов"
@@ -153,10 +153,10 @@ export default function UsersPage() {
                 />
               </div>
               <div>
-                <label className="block text-sm text-zinc-600 mb-1">Email</label>
+                <label className="block text-sm text-muted-foreground mb-1">Email</label>
                 <input
                   type="email"
-                  className="w-full border border-zinc-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500"
+                  className="w-full border border-input rounded-lg px-3 py-2 text-sm bg-background focus:outline-none focus:border-primary"
                   value={newEmail}
                   onChange={e => setNewEmail(e.target.value)}
                   placeholder="user@example.com"
@@ -164,10 +164,10 @@ export default function UsersPage() {
                 />
               </div>
               <div>
-                <label className="block text-sm text-zinc-600 mb-1">Пароль</label>
+                <label className="block text-sm text-muted-foreground mb-1">Пароль</label>
                 <input
                   type="password"
-                  className="w-full border border-zinc-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500"
+                  className="w-full border border-input rounded-lg px-3 py-2 text-sm bg-background focus:outline-none focus:border-primary"
                   value={newPassword}
                   onChange={e => setNewPassword(e.target.value)}
                   placeholder="Минимум 8 символов"
@@ -176,9 +176,9 @@ export default function UsersPage() {
                 />
               </div>
               <div>
-                <label className="block text-sm text-zinc-600 mb-1">Роль</label>
+                <label className="block text-sm text-muted-foreground mb-1">Роль</label>
                 <select
-                  className="w-full border border-zinc-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500"
+                  className="w-full border border-input rounded-lg px-3 py-2 text-sm bg-background focus:outline-none focus:border-primary"
                   value={newRole}
                   onChange={e => setNewRole(e.target.value)}
                 >
@@ -187,9 +187,9 @@ export default function UsersPage() {
                 </select>
               </div>
               <div>
-                <label className="block text-sm text-zinc-600 mb-1">Тенант (необязательно)</label>
+                <label className="block text-sm text-muted-foreground mb-1">Тенант (необязательно)</label>
                 <select
-                  className="w-full border border-zinc-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500"
+                  className="w-full border border-input rounded-lg px-3 py-2 text-sm bg-background focus:outline-none focus:border-primary"
                   value={newTenantId}
                   onChange={e => setNewTenantId(e.target.value)}
                 >
@@ -199,20 +199,20 @@ export default function UsersPage() {
                   ))}
                 </select>
               </div>
-              {createError && <p className="text-sm text-red-600">{createError}</p>}
+              {createError && <p className="text-sm text-destructive">{createError}</p>}
               <div className="flex gap-2 justify-end pt-1">
                 <button
                   type="button"
                   onClick={() => setShowCreate(false)}
                   disabled={createLoading}
-                  className="px-4 py-2 text-sm border border-zinc-300 rounded-lg disabled:opacity-60"
+                  className="px-4 py-2 text-sm border border-border rounded-lg disabled:opacity-60"
                 >
                   Отмена
                 </button>
                 <button
                   type="submit"
                   disabled={createLoading}
-                  className="px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-60"
+                  className="px-4 py-2 text-sm bg-primary text-primary-foreground rounded-lg hover:opacity-90 disabled:opacity-60"
                 >
                   {createLoading ? 'Создание...' : 'Создать'}
                 </button>
@@ -225,24 +225,24 @@ export default function UsersPage() {
       {/* Delete modal */}
       {deleteTarget && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl border border-zinc-200 p-6 w-full max-w-md space-y-4">
+          <div className="bg-card rounded-lg border border-border p-6 w-full max-w-md space-y-4">
             <h2 className="text-lg font-semibold">Удалить пользователя?</h2>
-            <p className="text-sm text-zinc-600">
+            <p className="text-sm text-muted-foreground">
               Удалить <span className="font-medium">{deleteTarget.email}</span>? Это действие нельзя отменить.
             </p>
-            {deleteError && <p className="text-sm text-red-600">{deleteError}</p>}
+            {deleteError && <p className="text-sm text-destructive">{deleteError}</p>}
             <div className="flex gap-2 justify-end">
               <button
                 onClick={() => setDeleteTarget(null)}
                 disabled={deleteLoading}
-                className="px-4 py-2 text-sm border border-zinc-300 rounded-lg disabled:opacity-60"
+                className="px-4 py-2 text-sm border border-border rounded-lg disabled:opacity-60"
               >
                 Отмена
               </button>
               <button
                 onClick={handleDelete}
                 disabled={deleteLoading}
-                className="px-4 py-2 text-sm bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-60"
+                className="px-4 py-2 text-sm bg-destructive text-destructive-foreground rounded-lg hover:opacity-90 disabled:opacity-60"
               >
                 {deleteLoading ? 'Удаление...' : 'Удалить'}
               </button>
@@ -251,32 +251,32 @@ export default function UsersPage() {
         </div>
       )}
 
-      <div className="bg-white rounded-lg border overflow-hidden">
+      <div className="bg-card rounded-lg border border-border overflow-hidden">
         <table className="w-full">
-          <thead className="bg-gray-50">
+          <thead className="text-left">
             <tr>
-              <th className="text-left p-4 font-medium">Пользователь</th>
-              <th className="text-left p-4 font-medium">Роль</th>
-              <th className="text-left p-4 font-medium">Статус</th>
-              <th className="text-left p-4 font-medium">Посл. вход</th>
-              <th className="text-left p-4 font-medium"></th>
+              <th className="text-left p-4 font-medium text-xs uppercase tracking-wider text-muted-foreground">Пользователь</th>
+              <th className="text-left p-4 font-medium text-xs uppercase tracking-wider text-muted-foreground">Роль</th>
+              <th className="text-left p-4 font-medium text-xs uppercase tracking-wider text-muted-foreground">Статус</th>
+              <th className="text-left p-4 font-medium text-xs uppercase tracking-wider text-muted-foreground">Посл. вход</th>
+              <th className="text-left p-4 font-medium text-xs uppercase tracking-wider text-muted-foreground"></th>
             </tr>
           </thead>
           <tbody>
             {users.map(u => {
               const isActive = u.is_active?.Bool ?? true
               return (
-                <tr key={u.id} className="border-t">
+                <tr key={u.id} className="border-t border-border/50">
                   <td className="p-4">
                     <p className="font-medium">{u.name}</p>
-                    <p className="text-xs text-zinc-400">{u.email}</p>
-                    <p className="text-xs text-zinc-300 font-mono">Создан: {fmtDate(u.created_at)}</p>
+                    <p className="text-xs text-muted-foreground">{u.email}</p>
+                    <p className="text-xs text-muted-foreground/70 font-mono">Создан: {fmtDate(u.created_at)}</p>
                   </td>
                   <td className="p-4">
                     <select
                       value={u.role}
                       onChange={e => handleRoleChange(u, e.target.value)}
-                      className="text-xs border border-zinc-300 rounded-lg px-2 py-1 focus:outline-none focus:border-blue-500"
+                      className="text-xs border border-input rounded-lg px-2 py-1 bg-background focus:outline-none focus:border-primary"
                     >
                       {ROLES.map(r => (
                         <option key={r} value={r}>{r}</option>
@@ -288,18 +288,18 @@ export default function UsersPage() {
                       onClick={() => handleToggleActive(u)}
                       className={`text-xs font-medium px-2 py-1 rounded-full border transition-colors ${
                         isActive
-                          ? 'bg-green-50 text-green-700 border-green-200 hover:bg-red-50 hover:text-red-600 hover:border-red-200'
-                          : 'bg-zinc-100 text-zinc-400 border-zinc-200 hover:bg-green-50 hover:text-green-700 hover:border-green-200'
+                          ? 'bg-success/15 text-success border-success/20 hover:bg-destructive/15 hover:text-destructive hover:border-destructive/20'
+                          : 'bg-muted text-muted-foreground border-border hover:bg-success/15 hover:text-success hover:border-success/20'
                       }`}
                     >
                       {isActive ? 'Активен' : 'Неактивен'}
                     </button>
                   </td>
-                  <td className="p-4 text-xs text-zinc-400">{fmtDate(u.last_login_at)}</td>
+                  <td className="p-4 text-xs text-muted-foreground">{fmtDate(u.last_login_at)}</td>
                   <td className="p-4">
                     <button
                       onClick={() => setDeleteTarget(u)}
-                      className="text-zinc-300 hover:text-red-600 transition-colors"
+                      className="text-muted-foreground/60 hover:text-destructive transition-colors"
                       title="Удалить"
                     >
                       ✕
@@ -311,7 +311,7 @@ export default function UsersPage() {
           </tbody>
         </table>
         {users.length === 0 && (
-          <div className="p-8 text-center text-gray-500">Нет пользователей</div>
+          <div className="p-8 text-center text-muted-foreground">Нет пользователей</div>
         )}
       </div>
     </div>
