@@ -3,7 +3,7 @@
 import { useState, FormEvent } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Loader2, AlertCircle, LogIn } from "lucide-react";
+import { Loader2, AlertCircle, LogIn, ShieldCheck } from "lucide-react";
 import { login, setAuthToken } from "@/lib/api";
 
 export default function LoginPage() {
@@ -29,19 +29,22 @@ export default function LoginPage() {
   };
 
   return (
-    <main className="min-h-screen bg-zinc-50 flex items-center justify-center p-4">
+    <main className="min-h-screen bg-background flex items-center justify-center p-4">
       <div className="w-full max-w-sm">
         <div className="text-center mb-8">
-          <h1 className="text-3xl font-bold text-zinc-900">PKI Сервис</h1>
-          <p className="text-zinc-500 mt-1">Подписание PDF-документов ЭЦП РК</p>
+          <span className="inline-flex h-12 w-12 items-center justify-center rounded-xl bg-primary/10 mb-3">
+            <ShieldCheck className="h-6 w-6 text-primary" />
+          </span>
+          <h1 className="text-2xl font-bold text-foreground">PKI Сервис</h1>
+          <p className="text-muted-foreground mt-1 text-sm">Подписание PDF-документов ЭЦП РК</p>
         </div>
 
-        <div className="bg-white rounded-2xl shadow-sm border border-zinc-200 p-6">
-          <h2 className="text-lg font-semibold text-zinc-800 mb-5">Вход в систему</h2>
+        <div className="rounded-2xl border border-border bg-card p-6 shadow-sm">
+          <h2 className="text-lg font-semibold text-foreground mb-5">Вход в систему</h2>
 
           <form onSubmit={onSubmit} className="space-y-4">
             <div className="space-y-1">
-              <label className="text-sm font-medium text-zinc-700" htmlFor="email">
+              <label className="text-sm font-medium text-foreground" htmlFor="email">
                 Email
               </label>
               <input
@@ -52,12 +55,12 @@ export default function LoginPage() {
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="admin@pki.local"
-                className="w-full border border-zinc-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#0070f3] focus:border-transparent"
+                className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-ring/40"
               />
             </div>
 
             <div className="space-y-1">
-              <label className="text-sm font-medium text-zinc-700" htmlFor="password">
+              <label className="text-sm font-medium text-foreground" htmlFor="password">
                 Пароль
               </label>
               <input
@@ -68,13 +71,13 @@ export default function LoginPage() {
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="••••••••"
-                className="w-full border border-zinc-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#0070f3] focus:border-transparent"
+                className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-ring/40"
               />
             </div>
 
             {error && (
-              <div className="flex items-start gap-2 bg-red-50 border border-red-200 rounded-lg p-3 text-sm text-[#d63031]">
-                <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" />
+              <div className="flex items-start gap-2 rounded-lg border border-destructive/20 bg-destructive/10 p-3 text-sm text-destructive">
+                <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
                 <span>{error}</span>
               </div>
             )}
@@ -82,20 +85,16 @@ export default function LoginPage() {
             <button
               type="submit"
               disabled={loading}
-              className="w-full py-2.5 rounded-xl font-semibold text-white bg-[#0070f3] hover:bg-blue-700 transition-colors flex items-center justify-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed"
+              className="flex w-full items-center justify-center gap-2 rounded-xl bg-primary py-2.5 font-semibold text-primary-foreground transition-colors hover:bg-[hsl(var(--primary-hover))] disabled:cursor-not-allowed disabled:opacity-60"
             >
-              {loading ? (
-                <Loader2 className="w-4 h-4 animate-spin" />
-              ) : (
-                <LogIn className="w-4 h-4" />
-              )}
+              {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <LogIn className="h-4 w-4" />}
               Войти
             </button>
           </form>
 
-          <p className="text-sm text-center text-zinc-500 mt-5">
+          <p className="mt-5 text-center text-sm text-muted-foreground">
             Нет аккаунта?{" "}
-            <Link href="/register" className="text-[#0070f3] hover:underline font-medium">
+            <Link href="/register" className="font-medium text-primary hover:underline">
               Зарегистрироваться
             </Link>
           </p>

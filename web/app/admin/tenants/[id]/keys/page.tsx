@@ -3,7 +3,6 @@
 import { use, useEffect, useState, useCallback } from "react";
 import Link from "next/link";
 import { ArrowLeft, Plus, Loader2, AlertCircle, Trash2, Copy, CheckCheck } from "lucide-react";
-import AdminGuard from "@/components/AdminGuard";
 import {
   adminListKeys,
   adminCreateKey,
@@ -188,7 +187,7 @@ function NewKeyModal({
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2 text-sm text-muted-foreground border border-zinc-300 rounded-lg hover:border-zinc-400"
+              className="px-4 py-2 text-sm text-muted-foreground border border-border rounded-lg hover:bg-muted/50"
             >
               Отмена
             </button>
@@ -227,8 +226,8 @@ function KeysPage({ tenantId }: { tenantId: string }) {
   }, [load]);
 
   return (
-    <main className="min-h-screen bg-background py-10 px-4">
-      <div className="max-w-3xl mx-auto space-y-6">
+    <div className="p-6 sm:p-8 max-w-3xl mx-auto">
+      <div className="space-y-6">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
             <Link
@@ -276,7 +275,7 @@ function KeysPage({ tenantId }: { tenantId: string }) {
           onCreated={load}
         />
       )}
-    </main>
+    </div>
   );
 }
 
@@ -286,9 +285,5 @@ export default function AdminKeysPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = use(params);
-  return (
-    <AdminGuard>
-      <KeysPage tenantId={id} />
-    </AdminGuard>
-  );
+  return <KeysPage tenantId={id} />;
 }

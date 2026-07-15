@@ -2,12 +2,13 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, usePathname } from "next/navigation";
 import { LogOut, LogIn, ShieldCheck } from "lucide-react";
 import { me, logout, getAuthToken, clearAuthToken, type User } from "@/lib/api";
 
 export default function Header() {
   const router = useRouter();
+  const pathname = usePathname();
   const [user, setUser] = useState<User | null>(null);
   const [ready, setReady] = useState(false);
 
@@ -49,6 +50,9 @@ export default function Header() {
     setUser(null);
     router.push("/login");
   };
+
+  // Admin-раздел использует собственный каркас (AdminShell) — публичная шапка не нужна
+  if (pathname?.startsWith("/admin")) return null;
 
   return (
     <header className="bg-card border-b border-border px-4 py-3 flex items-center justify-between shrink-0">

@@ -187,62 +187,62 @@ function BatchPage() {
 
   if (!items.length) {
     return (
-      <main className="min-h-screen bg-zinc-50 flex items-center justify-center">
-        <Loader2 className="w-6 h-6 animate-spin text-zinc-400" />
+      <main className="min-h-screen bg-background flex items-center justify-center">
+        <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
       </main>
     );
   }
 
   return (
-    <main className="min-h-screen bg-zinc-50 flex items-center justify-center p-4">
+    <main className="min-h-screen bg-background flex items-center justify-center p-4">
       <div className="w-full max-w-3xl">
         <div className="text-center mb-8">
-          <h1 className="text-3xl font-bold text-zinc-900">PKI Сервис</h1>
-          <p className="text-zinc-500 mt-1">Подписание PDF-документов ЭЦП РК</p>
+          <h1 className="text-3xl font-bold text-foreground">PKI Сервис</h1>
+          <p className="text-muted-foreground mt-1">Подписание PDF-документов ЭЦП РК</p>
         </div>
 
-        <div className="bg-white rounded-2xl shadow-sm border border-zinc-200 p-6 space-y-5">
+        <div className="bg-card rounded-2xl shadow-sm border border-border p-6 space-y-5">
 
           {/* Step indicator */}
-          <div className="flex items-center gap-2 text-sm text-zinc-500">
-            <span className="w-6 h-6 rounded-full bg-green-500 text-white flex items-center justify-center text-xs font-bold">✓</span>
-            <span className="text-zinc-400">Загрузка документов</span>
-            <span className="mx-2 text-zinc-300">→</span>
-            <span className="w-6 h-6 rounded-full bg-[#0070f3] text-white flex items-center justify-center text-xs font-bold">2</span>
-            <span className="font-medium text-zinc-700">
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <span className="w-6 h-6 rounded-full bg-success text-white flex items-center justify-center text-xs font-bold">✓</span>
+            <span className="text-muted-foreground">Загрузка документов</span>
+            <span className="mx-2 text-muted-foreground/60">→</span>
+            <span className="w-6 h-6 rounded-full bg-primary text-white flex items-center justify-center text-xs font-bold">2</span>
+            <span className="font-medium text-foreground">
               Подписание ({signable.length} из {items.length})
             </span>
           </div>
 
           {/* Documents table */}
-          <div className="border border-zinc-200 rounded-xl overflow-hidden">
+          <div className="border border-border rounded-xl overflow-hidden">
             <table className="w-full text-sm">
-              <thead className="bg-zinc-50 border-b border-zinc-200">
+              <thead className="bg-muted/40 border-b border-border">
                 <tr>
-                  <th className="text-left px-4 py-3 text-zinc-600 font-medium">Файл</th>
-                  <th className="text-left px-4 py-3 text-zinc-600 font-medium w-44">Статус</th>
-                  {showActions && <th className="text-left px-4 py-3 text-zinc-600 font-medium w-32">Действия</th>}
+                  <th className="text-left px-4 py-3 text-muted-foreground font-medium">Файл</th>
+                  <th className="text-left px-4 py-3 text-muted-foreground font-medium w-44">Статус</th>
+                  {showActions && <th className="text-left px-4 py-3 text-muted-foreground font-medium w-32">Действия</th>}
                 </tr>
               </thead>
-              <tbody className="divide-y divide-zinc-100">
+              <tbody className="divide-y divide-border/50">
                 {items.map((item) => (
                   <tr key={item.document_id} className={clsx(
-                    "hover:bg-zinc-50",
-                    item.status === "already_signed" && "bg-amber-50/50"
+                    "hover:bg-muted/40",
+                    item.status === "already_signed" && "bg-warning/10"
                   )}>
                     <td className="px-4 py-3">
-                      <p className="font-medium text-zinc-800 truncate max-w-xs">{item.filename}</p>
-                      <p className="text-xs text-zinc-400 font-mono">{item.document_id.slice(0, 8)}…</p>
+                      <p className="font-medium text-foreground truncate max-w-xs">{item.filename}</p>
+                      <p className="text-xs text-muted-foreground font-mono">{item.document_id.slice(0, 8)}…</p>
                     </td>
                     <td className="px-4 py-3">
                       <span className={clsx(
                         "inline-flex items-center gap-1.5 text-xs font-medium px-2 py-1 rounded-full",
-                        item.status === "signed"         && "bg-green-50 text-green-700",
-                        item.status === "error"          && "bg-red-50 text-red-600",
-                        item.status === "waiting"        && "bg-zinc-100 text-zinc-500",
-                        item.status === "already_signed" && "bg-amber-100 text-amber-700",
+                        item.status === "signed"         && "bg-success/10 text-success",
+                        item.status === "error"          && "bg-destructive/10 text-destructive",
+                        item.status === "waiting"        && "bg-muted text-muted-foreground",
+                        item.status === "already_signed" && "bg-warning/15 text-warning",
                         (item.status === "fetching" || item.status === "signing" || item.status === "submitting")
-                          && "bg-blue-50 text-blue-600",
+                          && "bg-primary/10 text-primary",
                       )}>
                         {(item.status === "fetching" || item.status === "signing" || item.status === "submitting") && (
                           <Loader2 className="w-3 h-3 animate-spin" />
@@ -261,7 +261,7 @@ function BatchPage() {
                               href={`/document/${item.document_id}`}
                               target="_blank"
                               rel="noopener noreferrer"
-                              className="text-[#0070f3] hover:text-blue-800"
+                              className="text-primary hover:text-primary"
                               title="Открыть документ"
                             >
                               <ExternalLink className="w-4 h-4" />
@@ -271,7 +271,7 @@ function BatchPage() {
                             <>
                               <button
                                 onClick={() => downloadFile(item.document_id, item.filename)}
-                                className="text-zinc-400 hover:text-zinc-700"
+                                className="text-muted-foreground hover:text-foreground"
                                 title="Скачать PDF"
                               >
                                 <Download className="w-4 h-4" />
@@ -281,7 +281,7 @@ function BatchPage() {
                                   href={`/verify/${item.signature_id}`}
                                   target="_blank"
                                   rel="noopener noreferrer"
-                                  className="text-zinc-400 hover:text-zinc-700"
+                                  className="text-muted-foreground hover:text-foreground"
                                   title="QR верификация"
                                 >
                                   <QrCode className="w-4 h-4" />
@@ -300,14 +300,14 @@ function BatchPage() {
 
           {/* Global error */}
           {globalError && (
-            <div className="flex items-start gap-2 bg-red-50 border border-red-200 rounded-lg p-3 text-sm text-[#d63031]">
+            <div className="flex items-start gap-2 bg-destructive/10 border border-destructive/20 rounded-lg p-3 text-sm text-destructive">
               <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" />
               <span>{globalError}</span>
             </div>
           )}
 
           {allSigned && (
-            <div className="flex items-center gap-2 bg-green-50 rounded-lg px-3 py-2 text-sm text-green-700">
+            <div className="flex items-center gap-2 bg-success/10 rounded-lg px-3 py-2 text-sm text-success">
               <CheckCircle2 className="w-4 h-4" />
               Все документы подписаны успешно.
             </div>
@@ -316,12 +316,12 @@ function BatchPage() {
           {/* Role selector + sign button */}
           {!done && signable.length > 0 && (
             <div className="flex items-center gap-3">
-              <label className="text-sm text-zinc-600 shrink-0">Роль подписанта:</label>
+              <label className="text-sm text-muted-foreground shrink-0">Роль подписанта:</label>
               <select
                 value={role}
                 onChange={(e) => setRole(e.target.value)}
                 disabled={busy}
-                className="flex-1 text-sm border border-zinc-300 rounded-lg px-3 py-2 bg-white text-zinc-800 focus:outline-none focus:ring-2 focus:ring-[#0070f3] disabled:opacity-50"
+                className="flex-1 text-sm border border-input rounded-lg px-3 py-2 bg-card text-foreground focus:outline-none focus:ring-2 focus:ring-primary disabled:opacity-50"
               >
                 {ROLE_OPTIONS.map((o) => (
                   <option key={o.value} value={o.value}>{o.label}</option>
@@ -338,7 +338,7 @@ function BatchPage() {
                 disabled={busy}
                 className={clsx(
                   "flex-1 py-3 rounded-xl font-semibold text-white transition-colors flex items-center justify-center gap-2",
-                  busy ? "bg-zinc-300 cursor-not-allowed" : "bg-[#0070f3] hover:bg-blue-700"
+                  busy ? "bg-muted cursor-not-allowed" : "bg-primary hover:bg-[hsl(var(--primary-hover))]"
                 )}
               >
                 {busy
@@ -349,7 +349,7 @@ function BatchPage() {
             <button
               type="button"
               onClick={newBatch}
-              className="px-6 py-3 rounded-xl font-semibold text-zinc-700 border border-zinc-300 hover:border-zinc-400 transition-colors"
+              className="px-6 py-3 rounded-xl font-semibold text-foreground border border-input hover:border-border transition-colors"
             >
               Новая партия
             </button>

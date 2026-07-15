@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from 'react'
 import { AlertCircle, ClipboardList, Download, ExternalLink } from 'lucide-react'
-import AdminGuard from '@/components/AdminGuard'
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge, type BadgeTone } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -253,9 +252,5 @@ function RegistryHome() {
 }
 
 export default function RegistryPage() {
-  return (
-    <AdminGuard>
-      <RegistryHome />
-    </AdminGuard>
-  )
+  return <RegistryHome />
 }

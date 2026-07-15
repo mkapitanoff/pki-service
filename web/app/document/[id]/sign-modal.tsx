@@ -112,7 +112,7 @@ export function SignModal({
       <Dialog.Trigger asChild>
         <button
           type="button"
-          className="flex items-center gap-2 px-4 py-2 rounded-lg bg-[#0070f3] text-white text-sm font-medium hover:bg-blue-700 transition-colors"
+          className="flex items-center gap-2 px-4 py-2 rounded-lg bg-primary text-white text-sm font-medium hover:bg-[hsl(var(--primary-hover))] transition-colors"
         >
           <PenLine className="w-4 h-4" />
           Подписать через NCALayer
@@ -121,16 +121,16 @@ export function SignModal({
 
       <Dialog.Portal>
         <Dialog.Overlay className="fixed inset-0 bg-black/40 backdrop-blur-sm z-40" />
-        <Dialog.Content className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-50 w-full max-w-md bg-white rounded-2xl shadow-xl p-6 focus:outline-none">
+        <Dialog.Content className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-50 w-full max-w-md bg-card rounded-2xl shadow-xl p-6 focus:outline-none">
           <div className="flex items-start justify-between mb-4">
-            <Dialog.Title className="text-lg font-semibold text-zinc-900">
+            <Dialog.Title className="text-lg font-semibold text-foreground">
               Подписание документа
             </Dialog.Title>
             <Dialog.Close asChild>
               <button
                 type="button"
                 disabled={busy}
-                className="text-zinc-400 hover:text-zinc-600 disabled:opacity-40"
+                className="text-muted-foreground hover:text-muted-foreground disabled:opacity-40"
                 aria-label="Закрыть"
               >
                 <X className="w-5 h-5" />
@@ -139,11 +139,11 @@ export function SignModal({
           </div>
 
           {/* Document info */}
-          <div className="bg-zinc-50 rounded-lg p-3 mb-5 space-y-1">
-            <p className="text-sm font-medium text-zinc-800 truncate">
+          <div className="bg-muted/40 rounded-lg p-3 mb-5 space-y-1">
+            <p className="text-sm font-medium text-foreground truncate">
               {documentTitle}
             </p>
-            <p className="text-xs text-zinc-400 font-mono break-all">
+            <p className="text-xs text-muted-foreground font-mono break-all">
               SHA-256: {sha256Hash.slice(0, 16)}…{sha256Hash.slice(-8)}
             </p>
           </div>
@@ -154,10 +154,10 @@ export function SignModal({
               className={clsx(
                 "flex items-center gap-2 rounded-lg px-3 py-2 mb-4 text-sm",
                 step === "done"
-                  ? "bg-green-50 text-[#00b894]"
+                  ? "bg-success/10 text-success"
                   : step === "error"
-                    ? "bg-red-50 text-[#d63031]"
-                    : "bg-blue-50 text-[#0070f3]"
+                    ? "bg-destructive/10 text-destructive"
+                    : "bg-primary/10 text-primary"
               )}
             >
               {busy && <Loader2 className="w-4 h-4 animate-spin shrink-0" />}
@@ -177,7 +177,7 @@ export function SignModal({
               <button
                 type="button"
                 onClick={connect}
-                className="w-full py-2.5 rounded-xl font-medium text-sm bg-[#0070f3] text-white hover:bg-blue-700 transition-colors flex items-center justify-center gap-2"
+                className="w-full py-2.5 rounded-xl font-medium text-sm bg-primary text-white hover:bg-[hsl(var(--primary-hover))] transition-colors flex items-center justify-center gap-2"
               >
                 <Wifi className="w-4 h-4" />
                 Подключиться к NCALayer
@@ -187,14 +187,14 @@ export function SignModal({
               <button
                 type="button"
                 onClick={sign}
-                className="w-full py-2.5 rounded-xl font-medium text-sm bg-[#00b894] text-white hover:bg-green-600 transition-colors flex items-center justify-center gap-2"
+                className="w-full py-2.5 rounded-xl font-medium text-sm bg-success text-white hover:opacity-90 transition-colors flex items-center justify-center gap-2"
               >
                 <PenLine className="w-4 h-4" />
                 Подписать ЭЦП
               </button>
             )}
             {busy && (
-              <div className="w-full py-2.5 rounded-xl bg-zinc-100 text-zinc-400 text-sm text-center">
+              <div className="w-full py-2.5 rounded-xl bg-muted text-muted-foreground text-sm text-center">
                 Пожалуйста, подождите...
               </div>
             )}

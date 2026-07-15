@@ -2,7 +2,12 @@
 
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { adminListTenants, adminCreateTenant, getAuthToken } from '@/lib/api'
+import { Building2, Plus, KeyRound } from 'lucide-react'
+import { adminListTenants, adminCreateTenant } from '@/lib/api'
+import { Card } from '@/components/ui/card'
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { Skeleton } from '@/components/ui/skeleton'
 
 interface Tenant {
   id: string
@@ -22,11 +27,6 @@ export default function TenantsPage() {
   const [newName, setNewName] = useState('')
 
   useEffect(() => {
-    const token = getAuthToken()
-    if (!token) {
-      router.push('/login')
-      return
-    }
     loadTenants()
   }, [])
 
@@ -53,74 +53,96 @@ export default function TenantsPage() {
     }
   }
 
-  if (loading) return <div className="p-8">Загрузка...</div>
-
   return (
-    <div className="p-8 max-w-5xl mx-auto">
-      <div className="flex justify-between items-center mb-6">
-        <h1 className="text-2xl font-bold">Тенанты</h1>
-        <button
-          onClick={() => setShowCreate(true)}
-          className="bg-primary text-primary-foreground px-4 py-2 rounded-lg hover:opacity-90"
-        >
-          + Создать тенанта
-        </button>
+    <div className="p-6 sm:p-8 max-w-5xl mx-auto space-y-5">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-bold text-foreground">Тенанты</h1>
+          <p className="text-sm text-muted-foreground mt-1">Организации и их API-ключи</p>
+        </div>
+        <Button onClick={() => setShowCreate(true)}>
+          <Plus className="h-4 w-4" />
+          <span className="hidden sm:inline">Создать тенанта</span>
+        </Button>
       </div>
 
-      {error && <div className="bg-destructive/10 text-destructive p-3 rounded mb-4">{error}</div>}
-
-      {showCreate && (
-        <div className="bg-card border border-border rounded-lg p-6 mb-6">
-          <h2 className="font-semibold mb-4 text-foreground">Новый тенант</h2>
-          <input
-            className="border border-input rounded px-3 py-2 w-full mb-3 bg-background focus:outline-none focus:border-primary"
-            placeholder="Название"
-            value={newName}
-            onChange={e => setNewName(e.target.value)}
-          />
-          <div className="flex gap-2">
-            <button onClick={createTenant} className="bg-primary text-primary-foreground px-4 py-2 rounded hover:opacity-90">Создать</button>
-            <button onClick={() => setShowCreate(false)} className="border border-border px-4 py-2 rounded text-muted-foreground">Отмена</button>
-          </div>
-        </div>
+      {error && (
+        <div className="bg-destructive/10 text-destructive rounded-lg px-4 py-3 text-sm">{error}</div>
       )}
 
-      <div className="bg-card rounded-lg border border-border overflow-hidden">
-        <table className="w-full data-table">
-          <thead>
-            <tr>
-              <th>Название</th>
-              <th>Статус</th>
-              <th>API ключей</th>
-              <th>Действия</th>
-            </tr>
-          </thead>
-          <tbody>
-            {tenants.map(t => (
-              <tr key={t.id}>
-                <td>{t.name}</td>
-                <td>
-                  <span className={`px-2.5 py-1 rounded-full text-xs font-medium ${t.is_active ? 'bg-success/15 text-success' : 'bg-muted text-muted-foreground'}`}>
-                    {t.is_active ? 'Активен' : 'Неактивен'}
-                  </span>
-                </td>
-                <td>{t.api_keys_count}</td>
-                <td>
-                  <button
-                    onClick={() => router.push(`/admin/tenants/${t.id}/keys`)}
-                    className="text-primary hover:underline font-medium text-sm"
-                  >
-                    Ключи
-                  </button>
-                </td>
+      {showCreate && (
+        <Card className="p-5 space-y-3">
+          <h2 className="font-semibold text-foreground">Новый тенант</h2>
+          <input
+            className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm focus:border-primary focus:outline-none"
+            placeholder="Название организации"
+            value={newName}
+            onChange={(e) => setNewName(e.target.value)}
+            autoFocus
+          />
+          <div className="flex gap-2">
+            <Button onClick={createTenant} disabled={!newName.trim()}>Создать</Button>
+            <Button variant="outline" onClick={() => setShowCreate(false)}>Отмена</Button>
+          </div>
+        </Card>
+      )}
+
+      <Card className="overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full data-table">
+            <thead>
+              <tr>
+                <th>Название</th>
+                <th>Статус</th>
+                <th className="text-right tabular-nums">API-ключей</th>
+                <th></th>
               </tr>
-            ))}
-          </tbody>
-        </table>
-        {tenants.length === 0 && (
-          <div className="p-8 text-center text-muted-foreground">Тенантов нет</div>
+            </thead>
+            <tbody>
+              {loading &&
+                Array.from({ length: 5 }).map((_, i) => (
+                  <tr key={i}>
+                    <td colSpan={4}>
+                      <Skeleton className="h-5 w-full" />
+                    </td>
+                  </tr>
+                ))}
+              {!loading &&
+                tenants.map((t) => (
+                  <tr key={t.id}>
+                    <td>
+                      <div className="flex items-center gap-2 font-medium text-foreground">
+                        <Building2 className="h-4 w-4 text-muted-foreground shrink-0" />
+                        {t.name}
+                      </div>
+                    </td>
+                    <td>
+                      <Badge tone={t.is_active ? 'success' : 'muted'}>
+                        {t.is_active ? 'Активен' : 'Неактивен'}
+                      </Badge>
+                    </td>
+                    <td className="text-right tabular-nums text-muted-foreground">{t.api_keys_count}</td>
+                    <td className="text-right whitespace-nowrap">
+                      <button
+                        onClick={() => router.push(`/admin/tenants/${t.id}/keys`)}
+                        className="inline-flex items-center gap-1 text-sm font-medium text-primary hover:underline"
+                      >
+                        <KeyRound className="h-3.5 w-3.5" />
+                        Ключи
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+            </tbody>
+          </table>
+        </div>
+        {!loading && tenants.length === 0 && (
+          <div className="py-12 text-center">
+            <Building2 className="h-12 w-12 mx-auto mb-3 opacity-50 text-muted-foreground" />
+            <p className="text-sm text-muted-foreground">Тенантов пока нет</p>
+          </div>
         )}
-      </div>
+      </Card>
     </div>
   )
 }

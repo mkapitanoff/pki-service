@@ -68,27 +68,27 @@ const STATUS_CONFIG: Record<
 > = {
   draft: {
     label: "Не подписан",
-    color: "bg-zinc-100 text-zinc-600",
+    color: "bg-muted text-muted-foreground",
     icon: <Clock className="w-3.5 h-3.5" />,
   },
   pending: {
     label: "Ожидает подписания",
-    color: "bg-amber-50 text-amber-600 border border-amber-200",
+    color: "bg-warning/10 text-warning border border-warning/20",
     icon: <Clock className="w-3.5 h-3.5" />,
   },
   partially_signed: {
     label: "Ожидает подписания",
-    color: "bg-amber-50 text-amber-600 border border-amber-200",
+    color: "bg-warning/10 text-warning border border-warning/20",
     icon: <Clock className="w-3.5 h-3.5" />,
   },
   signed: {
     label: "Подписан",
-    color: "bg-green-50 text-[#00b894] border border-green-200",
+    color: "bg-success/10 text-success border border-success/20",
     icon: <CheckCircle2 className="w-3.5 h-3.5" />,
   },
   rejected: {
     label: "Отклонён",
-    color: "bg-red-50 text-[#d63031] border border-red-200",
+    color: "bg-destructive/10 text-destructive border border-destructive/20",
     icon: <AlertCircle className="w-3.5 h-3.5" />,
   },
 };
@@ -98,21 +98,21 @@ const STATUS_CONFIG: Record<
 function SignatureCard({ sig }: { sig: Signature }) {
   console.log("sha256:", sig.sha256_hash);
   const cfg = sig.ocsp_status === "good"
-    ? { label: "Подпись действительна ✓", color: "text-[#00b894]" }
-    : { label: "Статус неизвестен", color: "text-zinc-400" };
+    ? { label: "Подпись действительна ✓", color: "text-success" }
+    : { label: "Статус неизвестен", color: "text-muted-foreground" };
 
   return (
-    <div className="border border-zinc-200 rounded-xl p-4 space-y-3 bg-white">
+    <div className="border border-border rounded-xl p-4 space-y-3 bg-card">
       <div className="flex items-start justify-between gap-2">
         <div>
-          <p className="font-semibold text-zinc-900">{sig.signer_name}</p>
-          <p className="text-xs text-zinc-400 mt-0.5">
+          <p className="font-semibold text-foreground">{sig.signer_name}</p>
+          <p className="text-xs text-muted-foreground mt-0.5">
             {sig.signer_type === "legal_entity_rep"
               ? "Представитель юридического лица"
               : "Физическое лицо"}
           </p>
         </div>
-        <span className="text-xs font-medium text-zinc-400 shrink-0">
+        <span className="text-xs font-medium text-muted-foreground shrink-0">
           #{sig.sequence_num}
         </span>
       </div>
@@ -120,41 +120,41 @@ function SignatureCard({ sig }: { sig: Signature }) {
       <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-sm">
         {nullStr(sig.signer_iin) && (
           <>
-            <span className="text-zinc-500">ИИН</span>
+            <span className="text-muted-foreground">ИИН</span>
             <span className="font-mono">{maskIIN(sig.signer_iin)}</span>
           </>
         )}
         {nullStr(sig.org_name) && (
           <>
-            <span className="text-zinc-500">Организация</span>
+            <span className="text-muted-foreground">Организация</span>
             <span className="truncate">{nullStr(sig.org_name)}</span>
           </>
         )}
         {nullStr(sig.signer_bin) && (
           <>
-            <span className="text-zinc-500">БИН</span>
+            <span className="text-muted-foreground">БИН</span>
             <span className="font-mono">{nullStr(sig.signer_bin)}</span>
           </>
         )}
         {nullStr(sig.basis) && (
           <>
-            <span className="text-zinc-500">Основание</span>
+            <span className="text-muted-foreground">Основание</span>
             <span>{nullStr(sig.basis)}</span>
           </>
         )}
-        <span className="text-zinc-500">Роль</span>
+        <span className="text-muted-foreground">Роль</span>
         <span>{sig.role}</span>
-        <span className="text-zinc-500">Дата подписи</span>
+        <span className="text-muted-foreground">Дата подписи</span>
         <span>{fmtDate(sig.signed_at)}</span>
         {nullStr((sig.tsp_time as unknown as { Time: string; Valid: boolean })?.Time) && (
           <>
-            <span className="text-zinc-500">Время TSP</span>
+            <span className="text-muted-foreground">Время TSP</span>
             <span>{fmtDate(sig.tsp_time)}</span>
           </>
         )}
       </div>
 
-      <div className="border-t border-zinc-100 pt-3 space-y-1 text-xs text-zinc-500">
+      <div className="border-t border-border/50 pt-3 space-y-1 text-xs text-muted-foreground">
         <p>
           <span className="font-medium">УЦ:</span> {sig.ca_name}
         </p>
@@ -177,12 +177,12 @@ function SignatureCard({ sig }: { sig: Signature }) {
       </div>
 
       <div className="flex items-center gap-3 pt-1">
-        <QrCode className="w-10 h-10 text-zinc-300 shrink-0" />
+        <QrCode className="w-10 h-10 text-muted-foreground/60 shrink-0" />
         <a
           href={sig.qr_url}
           target="_blank"
           rel="noopener noreferrer"
-          className="text-xs text-[#0070f3] hover:underline break-all"
+          className="text-xs text-primary hover:underline break-all"
         >
           {sig.qr_url}
         </a>
@@ -230,13 +230,13 @@ function DocumentPageInner({ id }: { id: string }) {
 
   if (loadError) {
     return (
-      <main className="min-h-screen bg-zinc-50 flex items-center justify-center p-4">
-        <div className="bg-white rounded-2xl border border-zinc-200 p-8 max-w-md w-full text-center space-y-4">
-          <AlertCircle className="w-10 h-10 text-[#d63031] mx-auto" />
-          <p className="text-zinc-700 font-medium">{loadError}</p>
+      <main className="min-h-screen bg-background flex items-center justify-center p-4">
+        <div className="bg-card rounded-2xl border border-border p-8 max-w-md w-full text-center space-y-4">
+          <AlertCircle className="w-10 h-10 text-destructive mx-auto" />
+          <p className="text-foreground font-medium">{loadError}</p>
           <Link
             href="/"
-            className="inline-flex items-center gap-1 text-sm text-[#0070f3] hover:underline"
+            className="inline-flex items-center gap-1 text-sm text-primary hover:underline"
           >
             <ArrowLeft className="w-3.5 h-3.5" />
             На главную
@@ -248,8 +248,8 @@ function DocumentPageInner({ id }: { id: string }) {
 
   if (!doc) {
     return (
-      <main className="min-h-screen bg-zinc-50 flex items-center justify-center">
-        <Loader2 className="w-8 h-8 text-[#0070f3] animate-spin" />
+      <main className="min-h-screen bg-background flex items-center justify-center">
+        <Loader2 className="w-8 h-8 text-primary animate-spin" />
       </main>
     );
   }
@@ -262,25 +262,25 @@ function DocumentPageInner({ id }: { id: string }) {
       : "";
 
   return (
-    <main className="min-h-screen bg-zinc-50 py-8 px-4">
+    <main className="min-h-screen bg-background py-8 px-4">
       <div className="max-w-2xl mx-auto space-y-6">
         {/* Back */}
         <Link
           href="/"
-          className="inline-flex items-center gap-1 text-sm text-zinc-500 hover:text-zinc-800 transition-colors"
+          className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors"
         >
           <ArrowLeft className="w-3.5 h-3.5" />
           Загрузить другой документ
         </Link>
 
         {/* Header card */}
-        <div className="bg-white rounded-2xl border border-zinc-200 p-6">
+        <div className="bg-card rounded-2xl border border-border p-6">
           <div className="flex items-start justify-between gap-4 mb-4">
             <div className="min-w-0">
-              <h1 className="text-xl font-bold text-zinc-900 truncate">
+              <h1 className="text-xl font-bold text-foreground truncate">
                 {nullStr(doc.title) || "Без названия"}
               </h1>
-              <p className="text-xs text-zinc-400 mt-1 font-mono break-all">
+              <p className="text-xs text-muted-foreground mt-1 font-mono break-all">
                 ID: {doc.id}
               </p>
             </div>
@@ -295,7 +295,7 @@ function DocumentPageInner({ id }: { id: string }) {
             </span>
           </div>
 
-          <div className="flex flex-wrap gap-3 text-sm text-zinc-500 mb-5">
+          <div className="flex flex-wrap gap-3 text-sm text-muted-foreground mb-5">
             <span>Версия: {doc.current_version}</span>
             <span>·</span>
             <span>Подписей: {sigs.length}</span>
@@ -333,7 +333,7 @@ function DocumentPageInner({ id }: { id: string }) {
                   a.click();
                   URL.revokeObjectURL(url);
                 }}
-                className="flex items-center gap-2 px-4 py-2 rounded-lg border border-zinc-300 text-zinc-700 text-sm font-medium hover:border-zinc-400 transition-colors"
+                className="flex items-center gap-2 px-4 py-2 rounded-lg border border-input text-foreground text-sm font-medium hover:border-border transition-colors"
               >
                 <Download className="w-4 h-4" />
                 Скачать PDF
@@ -344,7 +344,7 @@ function DocumentPageInner({ id }: { id: string }) {
           {/* Role selector for signing */}
           {doc.status !== "signed" && (
             <div className="mt-4 flex items-center gap-2">
-              <span className="text-xs text-zinc-500">Роль:</span>
+              <span className="text-xs text-muted-foreground">Роль:</span>
               {["client", "factor", "director"].map((r) => (
                 <button
                   key={r}
@@ -353,8 +353,8 @@ function DocumentPageInner({ id }: { id: string }) {
                   className={clsx(
                     "px-2.5 py-1 rounded-md text-xs font-medium border transition-colors",
                     role === r
-                      ? "bg-[#0070f3] text-white border-[#0070f3]"
-                      : "border-zinc-300 text-zinc-500 hover:border-zinc-400"
+                      ? "bg-primary text-white border-primary"
+                      : "border-input text-muted-foreground hover:border-border"
                   )}
                 >
                   {r === "client"
@@ -370,11 +370,11 @@ function DocumentPageInner({ id }: { id: string }) {
 
         {/* Signatures */}
         <div>
-          <h2 className="text-base font-semibold text-zinc-700 mb-3">
+          <h2 className="text-base font-semibold text-foreground mb-3">
             Подписи ({sigs.length})
           </h2>
           {sigs.length === 0 ? (
-            <div className="bg-white rounded-2xl border border-zinc-200 p-8 text-center text-zinc-400 text-sm">
+            <div className="bg-card rounded-2xl border border-border p-8 text-center text-muted-foreground text-sm">
               Документ ещё не подписан
             </div>
           ) : (
