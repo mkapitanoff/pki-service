@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { Building2, Plus, KeyRound } from 'lucide-react'
+import { Building2, Plus, KeyRound, CheckCircle2, Circle } from 'lucide-react'
 import { adminListTenants, adminCreateTenant } from '@/lib/api'
 import { Card } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -118,6 +118,7 @@ export default function TenantsPage() {
                     </td>
                     <td>
                       <Badge tone={t.is_active ? 'success' : 'muted'}>
+                        {t.is_active ? <CheckCircle2 className="h-3 w-3" /> : <Circle className="h-3 w-3" />}
                         {t.is_active ? 'Активен' : 'Неактивен'}
                       </Badge>
                     </td>

@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { Plus, Trash2, UserRound } from 'lucide-react'
+import { Plus, Trash2, UserRound, CheckCircle2, Circle } from 'lucide-react'
 import {
   adminListUsers,
   adminUpdateUser,
@@ -176,6 +176,7 @@ export default function UsersPage() {
                       <td>
                         <button onClick={() => handleToggleActive(u)} title="Переключить статус">
                           <Badge tone={isActive ? 'success' : 'muted'}>
+                            {isActive ? <CheckCircle2 className="h-3 w-3" /> : <Circle className="h-3 w-3" />}
                             {isActive ? 'Активен' : 'Неактивен'}
                           </Badge>
                         </button>

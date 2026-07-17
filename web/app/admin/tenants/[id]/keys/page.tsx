@@ -2,7 +2,8 @@
 
 import { use, useEffect, useState, useCallback } from "react";
 import Link from "next/link";
-import { ArrowLeft, Plus, Loader2, AlertCircle, Trash2, Copy, CheckCheck } from "lucide-react";
+import { Plus, Loader2, AlertCircle, Trash2, Copy, CheckCheck, CheckCircle2, Circle } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
 import {
   adminListKeys,
   adminCreateKey,
@@ -47,15 +48,10 @@ function KeyRow({
         </p>
       </div>
       <div className="flex items-center gap-3">
-        <span
-          className={`text-xs font-medium px-2 py-0.5 rounded-full ${
-            apiKey.is_active
-              ? "bg-success/15 text-success"
-              : "bg-muted text-muted-foreground"
-          }`}
-        >
+        <Badge tone={apiKey.is_active ? "success" : "muted"}>
+          {apiKey.is_active ? <CheckCircle2 className="h-3 w-3" /> : <Circle className="h-3 w-3" />}
           {apiKey.is_active ? "Активен" : "Неактивен"}
-        </span>
+        </Badge>
         {apiKey.is_active && (
           <button
             onClick={handleDeactivate}
@@ -228,23 +224,22 @@ function KeysPage({ tenantId }: { tenantId: string }) {
   return (
     <div>
       <div className="space-y-6">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <Link
-              href="/admin/tenants"
-              className="text-muted-foreground hover:text-foreground transition-colors"
-            >
-              <ArrowLeft className="w-5 h-5" />
-            </Link>
-            <h1 className="text-xl font-bold text-foreground">API-ключи</h1>
-            <span className="text-xs text-muted-foreground font-mono">{tenantId}</span>
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <nav className="mb-1 flex items-center gap-1.5 text-sm text-muted-foreground">
+              <Link href="/admin/tenants" className="hover:text-foreground">Тенанты</Link>
+              <span>/</span>
+              <span className="text-foreground">API-ключи</span>
+            </nav>
+            <h1 className="text-2xl font-bold text-foreground">API-ключи</h1>
+            <p className="mt-1 font-mono text-xs text-muted-foreground">{tenantId}</p>
           </div>
           <button
             onClick={() => setShowModal(true)}
-            className="flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground text-sm font-medium rounded-lg hover:opacity-90"
+            className="flex shrink-0 items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:opacity-90"
           >
-            <Plus className="w-4 h-4" />
-            Создать ключ
+            <Plus className="h-4 w-4" />
+            <span className="hidden sm:inline">Создать ключ</span>
           </button>
         </div>
 
