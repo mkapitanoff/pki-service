@@ -35,7 +35,7 @@ func TestVerifyCMS_Success(t *testing.T) {
 				Certificates: []ncaCertificate{{
 					Valid:        true,
 					SerialNumber: "2F5A91",
-					KeyUsage:     "digitalSignature, nonRepudiation",
+					KeyUsage:     "SIGN",
 					NotBefore:    time.Date(2026, 1, 8, 0, 0, 0, 0, time.UTC),
 					NotAfter:     time.Date(2027, 1, 8, 0, 0, 0, 0, time.UTC),
 					Subject: ncaSubject{
@@ -174,7 +174,7 @@ func TestMockClient(t *testing.T) {
 	require.False(t, ts.IsZero())
 }
 
-// keyUsage без nonRepudiation (сертификат аутентификации) → отклоняем (п.6.3).
+// keyUsage="AUTH" (сертификат аутентификации, реальный формат NCANode 3.x) → отклоняем (п.6.3).
 func TestVerifyCMS_AuthCertRejected(t *testing.T) {
 	c, srv := newTestClient(func(w http.ResponseWriter, r *http.Request) {
 		resp := cmsVerifyResponse{
@@ -182,7 +182,7 @@ func TestVerifyCMS_AuthCertRejected(t *testing.T) {
 			Signers: []ncaSigner{{
 				Certificates: []ncaCertificate{{
 					Valid:    true,
-					KeyUsage: "digitalSignature, keyEncipherment",
+					KeyUsage: "AUTH",
 					OCSP:     &ncaOCSP{Status: "GOOD"},
 					Subject:  ncaSubject{CommonName: "X", IIN: "000000000000"},
 				}},
@@ -197,8 +197,32 @@ func TestVerifyCMS_AuthCertRejected(t *testing.T) {
 	require.ErrorIs(t, err, ErrCertInvalidUsage)
 }
 
-// keyUsage с nonRepudiation (сертификат подписи) → принимаем.
+// keyUsage="SIGN" (сертификат подписи, реальный формат NCANode 3.x) → принимаем.
 func TestVerifyCMS_SignCertAccepted(t *testing.T) {
+	c, srv := newTestClient(func(w http.ResponseWriter, r *http.Request) {
+		resp := cmsVerifyResponse{
+			Valid: true,
+			Signers: []ncaSigner{{
+				Certificates: []ncaCertificate{{
+					Valid:    true,
+					KeyUsage: "SIGN",
+					OCSP:     &ncaOCSP{Status: "GOOD"},
+					Subject:  ncaSubject{CommonName: "X", IIN: "000000000000"},
+				}},
+			}},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(resp)
+	})
+	defer srv.Close()
+
+	res, err := c.VerifyCMS(context.Background(), "CMS", "hash")
+	require.NoError(t, err)
+	require.True(t, res.Valid)
+}
+
+// keyUsage в классическом X.509-формате (на случай другой конфигурации NCANode) → принимаем.
+func TestVerifyCMS_X509StyleKeyUsageAccepted(t *testing.T) {
 	c, srv := newTestClient(func(w http.ResponseWriter, r *http.Request) {
 		resp := cmsVerifyResponse{
 			Valid: true,

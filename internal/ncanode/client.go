@@ -305,19 +305,19 @@ func normalizeOCSP(o *ncaOCSP) string {
 	}
 }
 
-// keyUsagePermitsSigning проверяет, что KeyUsage сертификата допускает ЭЦП
-// (наличие nonRepudiation / contentCommitment / Неотрекаемость). Пустой
-// KeyUsage (NCANode не вернул поле) не блокируем — определить нельзя. Непустой
-// без nonRepudiation (например, сертификат аутентификации) — отклоняем (п.6.3
-// Правил проверки подлинности ЭЦП).
+// keyUsagePermitsSigning проверяет, что KeyUsage сертификата допускает ЭЦП.
+// NCANode 3.x возвращает упрощённый enum ("SIGN" / "AUTH"), а не X.509-строку
+// расширения KeyUsage — сертификат аутентификации ("AUTH") для ЭЦП недопустим
+// (п.6.3 Правил проверки подлинности ЭЦП). На случай, если конфигурация
+// NCANode вернёт классические X.509-имена (nonRepudiation/contentCommitment),
+// они тоже не содержат "auth" и будут допущены. Пустой KeyUsage (поле не
+// вернулось) не блокируем — определить нельзя.
 func keyUsagePermitsSigning(ku string) bool {
 	n := normalizeKeyUsage(ku)
 	if n == "" {
 		return true
 	}
-	return strings.Contains(n, "nonrepudiation") ||
-		strings.Contains(n, "contentcommitment") ||
-		strings.Contains(n, "неотрекаемость")
+	return !strings.Contains(n, "auth")
 }
 
 // normalizeKeyUsage приводит строку KeyUsage к нижнему регистру и оставляет
