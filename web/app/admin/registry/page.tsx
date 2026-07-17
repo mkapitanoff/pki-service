@@ -105,7 +105,7 @@ function RegistryHome() {
   const pageEnd = Math.min(offset + PAGE_SIZE, total)
 
   return (
-    <div className="max-w-6xl mx-auto p-6 sm:p-8 space-y-4">
+    <div className="space-y-4">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-foreground">Реестр подписаний</h1>

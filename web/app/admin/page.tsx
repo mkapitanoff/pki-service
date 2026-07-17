@@ -26,7 +26,7 @@ const CARDS = [
 
 export default function AdminHome() {
   return (
-    <div className="p-6 sm:p-8 max-w-5xl mx-auto space-y-6">
+    <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-bold text-foreground">Панель администратора</h1>
         <p className="text-sm text-muted-foreground mt-1">

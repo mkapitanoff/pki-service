@@ -148,7 +148,9 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
       )}
 
       {/* Content */}
-      <main className="lg:pl-64">{children}</main>
+      <main className="lg:pl-64">
+        <div className="mx-auto w-full max-w-6xl p-6 sm:p-8">{children}</div>
+      </main>
     </div>
   );
 }
