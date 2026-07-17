@@ -87,6 +87,14 @@ type SigningConfig struct {
 	CacheBucket               string `mapstructure:"cache_bucket"`
 	SignedBucket              string `mapstructure:"signed_bucket"`
 	CMSBucket                 string `mapstructure:"cms_bucket"`
+	// PostprocessTickIntervalSec — период тика PostprocessWorker (QR-штамп +
+	// Лист подписей + upload клиенту в фоне после /sign/complete). По
+	// умолчанию 3с — короткий интервал, т.к. это на пользовательском пути
+	// восприятия скорости подписания. См. план: synthetic-launching-blanket.md.
+	PostprocessTickIntervalSec int `mapstructure:"postprocess_tick_interval_sec"`
+	// MaxPostprocessAttempts — потолок попыток перед терминальным
+	// post_process_failed (по умолчанию 5).
+	MaxPostprocessAttempts int `mapstructure:"max_postprocess_attempts"`
 }
 
 type VerificationConfig struct {

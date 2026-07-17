@@ -117,6 +117,10 @@ func (s *SignService) Sign(ctx context.Context, input SignInput) (*SignResult, e
 			return nil, apperr.ErrCMSInvalid.WithCause(err)
 		case stderrors.Is(err, ncanode.ErrCertRevoked):
 			return nil, apperr.ErrCertRevoked.WithCause(err)
+		case stderrors.Is(err, ncanode.ErrCertStatusUnknown):
+			return nil, apperr.ErrCertStatusUnknown.WithCause(err)
+		case stderrors.Is(err, ncanode.ErrCertInvalidUsage):
+			return nil, apperr.ErrCertInvalidUsage.WithCause(err)
 		default:
 			return nil, apperr.ErrInternal.WithCause(err)
 		}

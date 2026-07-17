@@ -35,6 +35,7 @@ func TestVerifyCMS_Success(t *testing.T) {
 				Certificates: []ncaCertificate{{
 					Valid:        true,
 					SerialNumber: "2F5A91",
+					KeyUsage:     "digitalSignature, nonRepudiation",
 					NotBefore:    time.Date(2026, 1, 8, 0, 0, 0, 0, time.UTC),
 					NotAfter:     time.Date(2027, 1, 8, 0, 0, 0, 0, time.UTC),
 					Subject: ncaSubject{
@@ -173,7 +174,124 @@ func TestMockClient(t *testing.T) {
 	require.False(t, ts.IsZero())
 }
 
+// keyUsage без nonRepudiation (сертификат аутентификации) → отклоняем (п.6.3).
+func TestVerifyCMS_AuthCertRejected(t *testing.T) {
+	c, srv := newTestClient(func(w http.ResponseWriter, r *http.Request) {
+		resp := cmsVerifyResponse{
+			Valid: true,
+			Signers: []ncaSigner{{
+				Certificates: []ncaCertificate{{
+					Valid:    true,
+					KeyUsage: "digitalSignature, keyEncipherment",
+					OCSP:     &ncaOCSP{Status: "GOOD"},
+					Subject:  ncaSubject{CommonName: "X", IIN: "000000000000"},
+				}},
+			}},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(resp)
+	})
+	defer srv.Close()
+
+	_, err := c.VerifyCMS(context.Background(), "CMS", "hash")
+	require.ErrorIs(t, err, ErrCertInvalidUsage)
+}
+
+// keyUsage с nonRepudiation (сертификат подписи) → принимаем.
+func TestVerifyCMS_SignCertAccepted(t *testing.T) {
+	c, srv := newTestClient(func(w http.ResponseWriter, r *http.Request) {
+		resp := cmsVerifyResponse{
+			Valid: true,
+			Signers: []ncaSigner{{
+				Certificates: []ncaCertificate{{
+					Valid:    true,
+					KeyUsage: "digitalSignature, nonRepudiation",
+					OCSP:     &ncaOCSP{Status: "GOOD"},
+					Subject:  ncaSubject{CommonName: "X", IIN: "000000000000"},
+				}},
+			}},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(resp)
+	})
+	defer srv.Close()
+
+	res, err := c.VerifyCMS(context.Background(), "CMS", "hash")
+	require.NoError(t, err)
+	require.True(t, res.Valid)
+}
+
+// Пустой keyUsage (NCANode не вернул поле) → не блокируем (backward-compat).
+func TestVerifyCMS_EmptyKeyUsageAccepted(t *testing.T) {
+	c, srv := newTestClient(func(w http.ResponseWriter, r *http.Request) {
+		resp := cmsVerifyResponse{
+			Valid: true,
+			Signers: []ncaSigner{{
+				Certificates: []ncaCertificate{{
+					Valid:   true,
+					OCSP:    &ncaOCSP{Status: "GOOD"},
+					Subject: ncaSubject{CommonName: "X", IIN: "000000000000"},
+				}},
+			}},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(resp)
+	})
+	defer srv.Close()
+
+	res, err := c.VerifyCMS(context.Background(), "CMS", "hash")
+	require.NoError(t, err)
+	require.True(t, res.Valid)
+}
+
+// OCSP status=unknown → fail-closed (п.6.2).
+func TestVerifyCMS_OCSPUnknownRejected(t *testing.T) {
+	c, srv := newTestClient(func(w http.ResponseWriter, r *http.Request) {
+		resp := cmsVerifyResponse{
+			Valid: true,
+			Signers: []ncaSigner{{
+				Certificates: []ncaCertificate{{
+					Valid:    true,
+					KeyUsage: "digitalSignature, nonRepudiation",
+					OCSP:     &ncaOCSP{Status: "UNKNOWN"},
+					Subject:  ncaSubject{CommonName: "X", IIN: "000000000000"},
+				}},
+			}},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(resp)
+	})
+	defer srv.Close()
+
+	_, err := c.VerifyCMS(context.Background(), "CMS", "hash")
+	require.ErrorIs(t, err, ErrCertStatusUnknown)
+}
+
+// OCSP отсутствует (nil) → статус не определён → fail-closed (п.6.2).
+func TestVerifyCMS_OCSPMissingRejected(t *testing.T) {
+	c, srv := newTestClient(func(w http.ResponseWriter, r *http.Request) {
+		resp := cmsVerifyResponse{
+			Valid: true,
+			Signers: []ncaSigner{{
+				Certificates: []ncaCertificate{{
+					Valid:    true,
+					KeyUsage: "digitalSignature, nonRepudiation",
+					Subject:  ncaSubject{CommonName: "X", IIN: "000000000000"},
+				}},
+			}},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(resp)
+	})
+	defer srv.Close()
+
+	_, err := c.VerifyCMS(context.Background(), "CMS", "hash")
+	require.ErrorIs(t, err, ErrCertStatusUnknown)
+}
+
 // guard: sentinel errors are distinct
 func TestSentinelsDistinct(t *testing.T) {
 	require.False(t, errors.Is(ErrCMSInvalid, ErrCertRevoked))
+	require.False(t, errors.Is(ErrCertStatusUnknown, ErrCertRevoked))
+	require.False(t, errors.Is(ErrCertInvalidUsage, ErrCMSInvalid))
 }

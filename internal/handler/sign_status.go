@@ -13,6 +13,7 @@ import (
 	"github.com/google/uuid"
 
 	apperr "github.com/mkapitanoff/pki-service/internal/errors"
+	"github.com/mkapitanoff/pki-service/internal/postprocess"
 	"github.com/mkapitanoff/pki-service/internal/repository"
 	"github.com/mkapitanoff/pki-service/internal/s3client"
 	"github.com/mkapitanoff/pki-service/internal/storage"
@@ -47,6 +48,10 @@ type sessionDocResponse struct {
 	// PENDING | FETCHING | READY | SIGNING | SIGNED | UPLOADING | UPLOADED | FAILED.
 	State      string  `json:"state"`
 	S3Key      string  `json:"s3_key,omitempty"`
+	// VerifyURL — публичная страница проверки подписи. Появляется, как только
+	// state достигает SIGNED (не ждёт UPLOADED — верификация не зависит от
+	// готовности скачиваемого PDF).
+	VerifyURL  string  `json:"verify_url,omitempty"`
 	SignedAt   *string `json:"signed_at,omitempty"`
 	UploadedAt *string `json:"uploaded_at,omitempty"`
 	Error      *string `json:"error"`
@@ -71,7 +76,7 @@ func docStateFromStatus(s string) string {
 		return "UPLOADING"
 	case "uploaded":
 		return "UPLOADED"
-	case "fetch_failed", "upload_failed", "failed":
+	case "fetch_failed", "upload_failed", "failed", "post_process_failed":
 		return "FAILED"
 	default:
 		return "PENDING"
@@ -88,6 +93,8 @@ func docErrorCodeFromStatus(status string) string {
 		return "UPLOAD_FAILED"
 	case "failed":
 		return "SIGNING_FAILED"
+	case "post_process_failed":
+		return "POST_PROCESSING_FAILED"
 	default:
 		return ""
 	}
@@ -153,8 +160,17 @@ func (h *SignStatusHandler) HandleGetStatus(w http.ResponseWriter, r *http.Reque
 		if d.ClientRef.Valid {
 			rd.ClientRef = d.ClientRef.String
 		}
-		if d.TargetS3Key.Valid {
+		// S3Key — только когда файл реально готов и выгружен (UPLOADED).
+		// TargetS3Key приходит от клиента ещё на /sign/initiate — до этого он
+		// описывает НАМЕРЕНИЕ, не факт наличия файла; отдавать его раньше
+		// UPLOADED вводило бы интегратора в заблуждение о готовности файла.
+		if rd.State == "UPLOADED" && d.TargetS3Key.Valid {
 			rd.S3Key = d.TargetS3Key.String
+		}
+		if rd.State == "SIGNED" || rd.State == "UPLOADING" || rd.State == "UPLOADED" {
+			if d.QrUrl.Valid && d.QrUrl.String != "" {
+				rd.VerifyURL = d.QrUrl.String
+			}
 		}
 		if d.SignedAt.Valid {
 			s := d.SignedAt.Time.UTC().Format(time.RFC3339)
@@ -169,7 +185,13 @@ func (h *SignStatusHandler) HandleGetStatus(w http.ResponseWriter, r *http.Reque
 			rd.Error = &s
 		}
 		if rd.State == "FAILED" {
-			rd.ErrorCode = docErrorCodeFromStatus(d.Status)
+			// Приоритет — конкретный postprocess_error_code (например,
+			// TARGET_URL_EXPIRED), иначе общий код по статусу документа.
+			if d.PostprocessErrorCode.Valid && d.PostprocessErrorCode.String != "" {
+				rd.ErrorCode = d.PostprocessErrorCode.String
+			} else {
+				rd.ErrorCode = docErrorCodeFromStatus(d.Status)
+			}
 		}
 		docList = append(docList, rd)
 	}
@@ -289,13 +311,7 @@ func (h *SignStatusHandler) HandleRefreshURLs(w http.ResponseWriter, r *http.Req
 
 		// Download signed PDF and retry upload asynchronously.
 		if updated.SignedS3Key.Valid && updated.SignedS3Key.String != "" {
-			go func(sess repository.SigningSession, ud repository.SigningSessionDocument) {
-				pdfBytes, err := h.store.DownloadFile(context.Background(), ud.SignedS3Key.String)
-				if err != nil {
-					return
-				}
-				uploadSessionDocToClientS3(context.Background(), h.queries, h.extS3, h.store, sess, ud, pdfBytes)
-			}(session, updated)
+			go postprocess.RetryClientUpload(context.Background(), h.queries, h.extS3, h.store, session, updated)
 		}
 	}
 
@@ -342,7 +358,7 @@ func computeSessionStatus(docs []repository.SigningSessionDocument) string {
 		switch d.Status {
 		case "uploaded":
 			allReady = false
-		case "upload_failed":
+		case "upload_failed", "post_process_failed":
 			anyUploadFailed = true
 			allUploaded = false
 			allReady = false

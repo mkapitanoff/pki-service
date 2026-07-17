@@ -517,6 +517,14 @@ paths:
         `kz.gov.pki.knca.basics.signHashes`). Поддерживается std-base64,
         raw-std-base64, url-safe-base64, raw-url-safe-base64. Внутри CMS
         проверяется messageDigest ↔ session.hash; mismatch → 422 HASH_MISMATCH.
+
+        **Асинхронный постпроцессинг**: успешный ответ (`status: signed`)
+        означает, что подпись криптографически подтверждена — это финальный
+        юридический факт. QR-штамп на страницах, пересборка Листа подписей и
+        выгрузка готового PDF клиенту при этом продолжаются в фоне. Ответ НЕ
+        содержит `s3_key` и файл ещё недоступен для скачивания — используйте
+        `GET /sign/status/{session_id}` и ждите `state: UPLOADED` для каждого
+        документа, прежде чем показывать пользователю кнопку скачивания.
       parameters:
         - { $ref: '#/components/parameters/RequestID' }
       requestBody:
@@ -1328,9 +1336,16 @@ components:
         status:
           type: string
           enum: [signed, error]
+          description: |
+            `signed` означает, что CMS криптографически подтверждён NCANode —
+            документ юридически подписан. QR-штамп, Лист подписей и выгрузка
+            клиенту в этот момент ещё выполняются в фоне (обычно секунды).
         s3_key:
           type: string
-          description: 'Ключ подписанного PDF в S3 клиента (при status=signed)'
+          description: |
+            НЕ возвращается в этом ответе — артефакт ещё не готов сразу после
+            /sign/complete. Поллите /sign/status и дождитесь state=UPLOADED,
+            только тогда s3_key валиден и файл доступен для скачивания.
         error:
           type: string
           description: 'Сообщение об ошибке при status=error'
@@ -1358,12 +1373,27 @@ components:
         state:
           type: string
           enum: [PENDING, FETCHING, READY, SIGNING, SIGNED, UPLOADING, UPLOADED, FAILED]
-          description: 'Нормализованный enum для интеграций'
+          description: |
+            Нормализованный enum для интеграций. SIGNED означает "подписан
+            криптографически, артефакт ещё готовится в фоне" — кнопку
+            скачивания включайте только при UPLOADED, не раньше.
         error_code:
           type: string
-          enum: [FETCH_FAILED, UPLOAD_FAILED, SIGNING_FAILED]
-          description: 'Машинно-читаемый код ошибки документа (при state=FAILED)'
-        s3_key: { type: string }
+          enum: [FETCH_FAILED, UPLOAD_FAILED, SIGNING_FAILED, POST_PROCESSING_FAILED, TARGET_URL_EXPIRED]
+          description: |
+            Машинно-читаемый код ошибки документа (при state=FAILED).
+            POST_PROCESSING_FAILED — фоновая сборка PDF/выгрузка исчерпала
+            попытки. TARGET_URL_EXPIRED — presigned URL клиента истёк;
+            восстановимо через PATCH /sign/refresh-urls с новым URL.
+        s3_key:
+          type: string
+          description: 'Валиден только при state=UPLOADED — до этого пуст.'
+        verify_url:
+          type: string
+          description: |
+            Публичная страница проверки подписи (/verify/{doc_id}). Появляется
+            начиная с state=SIGNED — не привязана к готовности скачиваемого
+            PDF (в отличие от s3_key).
         signed_at: { type: string, format: date-time, nullable: true }
         uploaded_at: { type: string, format: date-time, nullable: true }
         error: { type: string, nullable: true }

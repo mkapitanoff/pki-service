@@ -345,6 +345,12 @@ type SigningSessionDocument struct {
 	TspTime               sql.NullTime   `json:"tsp_time"`
 	SignFormat            sql.NullString `json:"sign_format"`
 	QrUrl                 sql.NullString `json:"qr_url"`
+	PostprocessStatus     sql.NullString `json:"postprocess_status"`
+	PostprocessError      sql.NullString `json:"postprocess_error"`
+	PostprocessErrorCode  sql.NullString `json:"postprocess_error_code"`
+	PostprocessAttempts   int32          `json:"postprocess_attempts"`
+	PostprocessNextAt     sql.NullTime   `json:"postprocess_next_at"`
+	PostprocessStartedAt  sql.NullTime   `json:"postprocess_started_at"`
 }
 
 type Tenant struct {

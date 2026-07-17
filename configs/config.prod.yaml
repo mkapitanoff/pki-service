@@ -62,3 +62,5 @@ signing:
   cache_bucket: "pki-cache"
   signed_bucket: "pki-signed"
   cms_bucket: "pki-cms"
+  postprocess_tick_interval_sec: 3
+  max_postprocess_attempts: 5

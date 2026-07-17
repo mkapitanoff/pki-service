@@ -93,11 +93,77 @@ SET status = 'fetch_failed',
 WHERE id = $1
 RETURNING *;
 
--- name: UpdateSessionDocumentAfterSign :one
+-- name: MarkSessionDocumentSigned :one
+-- Быстрый синхронный путь: NCANode уже подтвердил CMS, CMS-архив уже залит.
+-- Документ юридически подписан, но артефакт (QR-штамп + Лист подписей) ещё
+-- не собран — это ставится в очередь постпроцессинга (postprocess_status).
 UPDATE signing_session_documents
-SET cms_s3_key = $2, signed_s3_key = $3, status = 'signed', signed_at = now()
+SET cms_s3_key = $2, status = 'signed', signed_at = now(),
+    postprocess_status = 'queued', postprocess_attempts = 0, postprocess_next_at = now()
 WHERE id = $1
 RETURNING *;
+
+-- name: ClaimSessionDocumentForPostprocess :one
+-- CAS: воркер забирает джобу, только если она ещё не в работе/не завершена.
+-- 0 строк = уже обработано другим воркером или дублирующей доставкой сообщения.
+-- status='uploading' держится все ретраи подряд (и на этапе pdfcpu-сборки, и
+-- на этапе клиентской выгрузки) — это единое "активно обрабатывается" для
+-- /sign/status; success → 'uploaded', terminal fail → 'post_process_failed'.
+UPDATE signing_session_documents
+SET postprocess_status = 'processing', postprocess_started_at = now(), status = 'uploading'
+WHERE id = $1
+  AND postprocess_status IN ('queued', 'retrying')
+RETURNING *;
+
+-- name: SetSessionDocumentSignedS3Key :exec
+-- Пишется сразу после успешной загрузки собранного PDF во внутренний MinIO,
+-- независимо от статуса всей джобы — позволяет ретраю пропустить повторную
+-- pdfcpu-сборку, если процесс упал уже после этого шага.
+UPDATE signing_session_documents
+SET signed_s3_key = $2
+WHERE id = $1;
+
+-- name: MarkSessionDocumentPostprocessDone :one
+UPDATE signing_session_documents
+SET status = 'uploaded', uploaded_at = now(), postprocess_status = 'done'
+WHERE id = $1
+RETURNING *;
+
+-- name: MarkSessionDocumentPostprocessRetrying :exec
+UPDATE signing_session_documents
+SET postprocess_status = 'retrying',
+    postprocess_attempts = postprocess_attempts + 1,
+    postprocess_error = $2,
+    postprocess_error_code = $3,
+    postprocess_next_at = $4,
+    last_error = $2
+WHERE id = $1;
+
+-- name: MarkSessionDocumentPostprocessFailed :one
+-- Терминальный провал: попытки исчерпаны. status='post_process_failed' —
+-- отдельное значение от upload_failed/fetch_failed, чтобы отличать провал на
+-- этапе фонового постпроцессинга от старых причин отказа.
+UPDATE signing_session_documents
+SET postprocess_status = 'failed',
+    postprocess_attempts = postprocess_attempts + 1,
+    postprocess_error = $2,
+    postprocess_error_code = $3,
+    postprocess_next_at = NULL,
+    status = 'post_process_failed',
+    last_error = $2
+WHERE id = $1
+RETURNING *;
+
+-- name: ListDocumentsDueForPostprocess :many
+-- Поллер (тот же паттерн, что ListDocumentsForVerification): подхватывает
+-- джобы, у которых наступило время следующей попытки — страхует publish-сбой
+-- и отсутствие бэкоффа у Nack(requeue=true) в RabbitMQ-консьюмере.
+SELECT * FROM signing_session_documents
+WHERE postprocess_status IN ('queued', 'retrying')
+  AND postprocess_next_at <= now()
+ORDER BY postprocess_next_at
+LIMIT $1
+FOR UPDATE SKIP LOCKED;
 
 -- name: UpdateSessionDocumentSignerInfo :one
 -- Персистит ncanode.VerifyResult + реальный verify QR-URL. Non-fatal при

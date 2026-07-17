@@ -68,15 +68,20 @@ SHA-256 (медленнее, `verification_status=unavailable`).
 ```json
 // request
 { "session_id": "…", "signatures": [ { "doc_id": "…", "cms": "<base64 CAdES/CMS>" } ] }
-// response
+// response — status:"signed" уже означает "юридически подписан", но НЕ значит
+// "файл готов к скачиванию" (s3_key намеренно отсутствует — см. §3.1)
 { "succeeded": 3, "failed": 0, "documents": [
-  { "doc_id": "…", "name": "…", "status": "signed", "s3_key": "signed/…" } ] }
+  { "doc_id": "…", "name": "…", "status": "signed" } ] }
 ```
 
 ### status
 Per-doc `state`: `PENDING → FETCHING → READY → SIGNING → SIGNED → UPLOADING → UPLOADED` | `FAILED`
-(`error_code`: `FETCH_FAILED` | `UPLOAD_FAILED` | `SIGNING_FAILED`). `session.status`:
-`pending | signing | completed | failed | expired`.
+(`error_code`: `FETCH_FAILED` | `UPLOAD_FAILED` | `SIGNING_FAILED` | `POST_PROCESSING_FAILED` |
+`TARGET_URL_EXPIRED`). `session.status`: `pending | signing | completed | failed | expired`.
+
+`verify_url` — публичная страница проверки подписи, появляется с `state: SIGNED` (не ждёт
+`UPLOADED` — верификация не зависит от готовности скачиваемого файла). `s3_key` — наоборот,
+валиден только при `state: UPLOADED`, до этого отсутствует в ответе.
 
 ### webhooks
 `callback_url` → события `session.document_signed | completed | failed`; подпись
@@ -96,6 +101,24 @@ Per-doc `state`: `PENDING → FETCHING → READY → SIGNING → SIGNED → UPLO
 CMS: NCALayer встраивает SHA-256 документа как eContent (attached CAdES/CMS); именно eContent
 Chandra сверяет с хэшем документа.
 
+### 3.1. Подписан vs Готов к скачиванию
+
+`POST /sign/complete`, вернув `status: "signed"`, подтверждает только то, что CMS
+криптографически провалидирован NCANode — это финальный юридический факт, дальше он не
+изменится. QR-штамп на страницах, пересборка Листа подписей и выгрузка готового PDF в
+`target_url` в этот момент продолжаются **в фоне** (обычно секунды, зависит от числа страниц).
+
+Это правило одинаково для всех интеграторов — не доработка под конкретный сервис:
+
+- Показывайте пользователю "Подписан" сразу по ответу `/sign/complete`.
+- Кнопку **"Скачать"** держите неактивной, пока по `GET /sign/status/{session_id}` документ не
+  дойдёт до `state: "UPLOADED"` — только тогда `s3_key` валиден и файл лежит по `target_url`.
+- Если документ уходит в `state: "FAILED"` с `error_code: "POST_PROCESSING_FAILED"` — фоновая
+  сборка/выгрузка исчерпала попытки, это терминально; смотрите `error` за подробностями.
+- Если `error_code: "TARGET_URL_EXPIRED"` — presigned URL истёк до того, как выгрузка успела
+  завершиться; пришлите свежий `target_url` через `PATCH /sign/refresh-urls`, выгрузка повторится
+  автоматически без пересборки PDF.
+
 ---
 
 ## 4. Обязательные правила (частые ошибки)
@@ -112,6 +135,8 @@ Chandra сверяет с хэшем документа.
    — обновить через `/refresh-urls`.
 6. **Маппинг по `client_ref`,** не по имени (дубль имени → `409`).
 7. **SHOULD:** `application_id` (связь с заявкой в реестре), `X-Request-Id` (дебаг).
+8. **Кнопку скачивания включать по `state=UPLOADED`, не по ответу `/sign/complete`.** `status:
+   "signed"` — это готовность подписи, не готовность файла; см. §3.1.
 
 ---
 
@@ -123,7 +148,10 @@ JSON `{ "error": { "code", "message", "request_id", "details"? } }`.
 `DUPLICATE_DOCUMENT_NAME` / `IDEMPOTENCY_KEY_REUSED` / `SESSION_CLOSED` 409 · `SESSION_EXPIRED` 410 ·
 `PAYLOAD_TOO_LARGE` 413 · `INVALID_CMS_BASE64` / `INVALID_CMS_STRUCTURE` / `HASH_MISMATCH` /
 `CERT_REVOKED` / `CERT_NOT_TRUSTED` / `CMS_INVALID` 422 · `RATE_LIMITED` 429 · `INTERNAL` 500 ·
-`FETCH_FAILED` 502.
+`FETCH_FAILED` 502. Асинхронный постпроцессинг (см. §3.1, отдаётся только через `/sign/status`,
+не через HTTP-код): `POST_PROCESSING_FAILED` (state=FAILED — исчерпаны попытки фоновой сборки/
+выгрузки), `TARGET_URL_EXPIRED` (state=FAILED — presigned URL истёк, восстановимо через
+`/refresh-urls`).
 
 `text/html` в ответе = апстрим (ingress), не контракт — трактовать как временную недоступность.
 

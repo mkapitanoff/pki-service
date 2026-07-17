@@ -25,6 +25,7 @@ import (
 
 	"github.com/mkapitanoff/pki-service/internal/ncanode"
 	"github.com/mkapitanoff/pki-service/internal/pdf"
+	"github.com/mkapitanoff/pki-service/internal/postprocess"
 	"github.com/mkapitanoff/pki-service/internal/repository"
 	"github.com/mkapitanoff/pki-service/internal/s3client"
 	"github.com/mkapitanoff/pki-service/internal/storage"
@@ -99,10 +100,25 @@ func signSessionRouter(
 ) http.Handler {
 	r := chi.NewRouter()
 	r.Post("/api/v1/sign/initiate", NewSignInitiateHandler(q, extS3, store, nil).HandleInitiate)
-	r.Post("/api/v1/sign/complete", NewSignCompleteHandler(q, nc, store, extS3, false, 0, "https://pki.test.local").HandleComplete)
+	r.Post("/api/v1/sign/complete", NewSignCompleteHandler(q, nc, store, false, 0, "https://pki.test.local").HandleComplete)
 	r.Get("/api/v1/sign/status/{session_id}", NewSignStatusHandler(q, extS3, store).HandleGetStatus)
 	r.Patch("/api/v1/sign/refresh-urls", NewSignStatusHandler(q, extS3, store).HandleRefreshURLs)
 	return r
+}
+
+// runPostprocess drives the background postprocessing step synchronously in
+// tests, standing in for PostprocessWorker's ticker (which isn't running in
+// the test process). Mirrors exactly what the worker would do on its next tick.
+func runPostprocess(t *testing.T, q *repository.Queries, store storage.Storage, extS3 s3client.ExternalS3Client, docID uuid.UUID) {
+	t.Helper()
+	doc, err := q.GetSigningSessionDocument(context.Background(), docID)
+	require.NoError(t, err)
+	postprocess.ProcessDocument(context.Background(), postprocess.Deps{
+		Queries:     q,
+		Store:       store,
+		ExtS3:       extS3,
+		MaxAttempts: 5,
+	}, doc)
 }
 
 // newSessionReq builds a request with a tenant injected into the context.
@@ -347,8 +363,15 @@ func TestSignComplete_Success(t *testing.T) {
 	respDocs := completeResp["documents"].([]interface{})
 	require.Len(t, respDocs, 1)
 	require.Equal(t, "signed", respDocs[0].(map[string]any)["status"])
+	require.Empty(t, respDocs[0].(map[string]any)["s3_key"],
+		"s3_key must not be present before background postprocessing finishes")
 
-	// Wait for the async upload goroutine to record the upload attempt.
+	// Drive the background postprocessing step (QR stamp + sign page + client
+	// upload) that PostprocessWorker's ticker would otherwise do.
+	docUUID, err := uuid.Parse(docID)
+	require.NoError(t, err)
+	runPostprocess(t, q, store, extS3, docUUID)
+
 	extS3.WaitForUploads(t, 1, 5*time.Second)
 }
 
@@ -621,6 +644,12 @@ func TestWebhookHMAC(t *testing.T) {
 	completeRec := httptest.NewRecorder()
 	router.ServeHTTP(completeRec, newSessionReq(http.MethodPost, "/api/v1/sign/complete", bytes.NewReader(completeBody), tenantID))
 	require.Equal(t, http.StatusOK, completeRec.Code, completeRec.Body.String())
+
+	// Drive background postprocessing — webhook fires from here, not from
+	// /sign/complete itself.
+	docUUID, err := uuid.Parse(docID)
+	require.NoError(t, err)
+	runPostprocess(t, q, store, extS3, docUUID)
 
 	// Wait for the webhook delivery.
 	select {

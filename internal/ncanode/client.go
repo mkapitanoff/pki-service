@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"strings"
 	"time"
+	"unicode"
 )
 
 // OCSP status values surfaced in VerifyResult.OCSPStatus.
@@ -26,6 +27,13 @@ const signFormatCAdES = "CAdES (CMS, PKCS#7)"
 var (
 	ErrCMSInvalid  = errors.New("ncanode: CMS signature is invalid")
 	ErrCertRevoked = errors.New("ncanode: certificate is revoked")
+	// ErrCertStatusUnknown — отозванность сертификата не подтверждена (OCSP
+	// недоступен / статус unknown). По Правилам проверки ЭЦП (п.6.2) отозванность
+	// должна быть подтверждена, поэтому неопределённый статус — fail-closed.
+	ErrCertStatusUnknown = errors.New("ncanode: certificate revocation status could not be determined (OCSP unknown)")
+	// ErrCertInvalidUsage — KeyUsage сертификата не допускает ЭЦП (нет
+	// nonRepudiation). Сертификат аутентификации для подписи недопустим (п.6.3).
+	ErrCertInvalidUsage = errors.New("ncanode: certificate key usage does not permit signing (nonRepudiation required)")
 )
 
 // VerifyResult is the normalized result of a CMS verification.
@@ -220,9 +228,21 @@ func (c *HTTPClient) VerifyCMS(ctx context.Context, cmsBase64 string, docSHA256 
 		return nil, ErrCMSInvalid
 	}
 
+	// п.6.3 Правил проверки подлинности ЭЦП (приказ №1187): сертификат для
+	// подписи обязан иметь nonRepudiation (Неотрекаемость). Сертификат
+	// аутентификации (digitalSignature+keyEncipherment) для ЭЦП недопустим.
+	if !keyUsagePermitsSigning(cert.KeyUsage) {
+		return nil, ErrCertInvalidUsage
+	}
+
+	// п.6.2: отозванность должна быть ПОДТВЕРЖДЕНА. revoked → отклоняем;
+	// unknown (OCSP недоступен / статус не определён) → fail-closed.
 	ocspStatus := normalizeOCSP(cert.OCSP)
-	if ocspStatus == OCSPStatusRevoked {
+	switch ocspStatus {
+	case OCSPStatusRevoked:
 		return nil, ErrCertRevoked
+	case OCSPStatusUnknown:
+		return nil, ErrCertStatusUnknown
 	}
 
 	ocspCheckedAt := time.Now().UTC()
@@ -283,6 +303,34 @@ func normalizeOCSP(o *ncaOCSP) string {
 	default:
 		return OCSPStatusUnknown
 	}
+}
+
+// keyUsagePermitsSigning проверяет, что KeyUsage сертификата допускает ЭЦП
+// (наличие nonRepudiation / contentCommitment / Неотрекаемость). Пустой
+// KeyUsage (NCANode не вернул поле) не блокируем — определить нельзя. Непустой
+// без nonRepudiation (например, сертификат аутентификации) — отклоняем (п.6.3
+// Правил проверки подлинности ЭЦП).
+func keyUsagePermitsSigning(ku string) bool {
+	n := normalizeKeyUsage(ku)
+	if n == "" {
+		return true
+	}
+	return strings.Contains(n, "nonrepudiation") ||
+		strings.Contains(n, "contentcommitment") ||
+		strings.Contains(n, "неотрекаемость")
+}
+
+// normalizeKeyUsage приводит строку KeyUsage к нижнему регистру и оставляет
+// только буквы/цифры — формат от NCANode может отличаться разделителями
+// (пробелы, запятые, скобки).
+func normalizeKeyUsage(s string) string {
+	var b strings.Builder
+	for _, r := range strings.ToLower(s) {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
 }
 
 func (c *HTTPClient) postJSON(ctx context.Context, path string, body any, out any) error {

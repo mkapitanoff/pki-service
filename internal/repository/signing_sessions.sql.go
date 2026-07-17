@@ -13,6 +13,76 @@ import (
 	"github.com/google/uuid"
 )
 
+const claimSessionDocumentForPostprocess = `-- name: ClaimSessionDocumentForPostprocess :one
+UPDATE signing_session_documents
+SET postprocess_status = 'processing', postprocess_started_at = now(), status = 'uploading'
+WHERE id = $1
+  AND postprocess_status IN ('queued', 'retrying')
+RETURNING id, session_id, document_name, source_url, target_url, target_s3_key, content_hash, cached_s3_key, signed_s3_key, cms_s3_key, status, last_error, upload_attempts, signed_at, uploaded_at, created_at, hash_source, source_s3_bucket, source_s3_key, source_content_type, source_size_bytes, source_meta_hash, verification_status, verification_checked_at, verification_error, verification_attempts, verification_next_at, client_index, client_ref, signer_iin, signer_name, signer_bin, org_name, signer_type, basis, cert_serial, cert_not_before, cert_not_after, ca_name, ocsp_status, tsp_time, sign_format, qr_url, postprocess_status, postprocess_error, postprocess_error_code, postprocess_attempts, postprocess_next_at, postprocess_started_at
+`
+
+// CAS: воркер забирает джобу, только если она ещё не в работе/не завершена.
+// 0 строк = уже обработано другим воркером или дублирующей доставкой сообщения.
+// status='uploading' держится все ретраи подряд (и на этапе pdfcpu-сборки, и
+// на этапе клиентской выгрузки) — это единое "активно обрабатывается" для
+// /sign/status; success → 'uploaded', terminal fail → 'post_process_failed'.
+func (q *Queries) ClaimSessionDocumentForPostprocess(ctx context.Context, id uuid.UUID) (SigningSessionDocument, error) {
+	row := q.db.QueryRowContext(ctx, claimSessionDocumentForPostprocess, id)
+	var i SigningSessionDocument
+	err := row.Scan(
+		&i.ID,
+		&i.SessionID,
+		&i.DocumentName,
+		&i.SourceUrl,
+		&i.TargetUrl,
+		&i.TargetS3Key,
+		&i.ContentHash,
+		&i.CachedS3Key,
+		&i.SignedS3Key,
+		&i.CmsS3Key,
+		&i.Status,
+		&i.LastError,
+		&i.UploadAttempts,
+		&i.SignedAt,
+		&i.UploadedAt,
+		&i.CreatedAt,
+		&i.HashSource,
+		&i.SourceS3Bucket,
+		&i.SourceS3Key,
+		&i.SourceContentType,
+		&i.SourceSizeBytes,
+		&i.SourceMetaHash,
+		&i.VerificationStatus,
+		&i.VerificationCheckedAt,
+		&i.VerificationError,
+		&i.VerificationAttempts,
+		&i.VerificationNextAt,
+		&i.ClientIndex,
+		&i.ClientRef,
+		&i.SignerIin,
+		&i.SignerName,
+		&i.SignerBin,
+		&i.OrgName,
+		&i.SignerType,
+		&i.Basis,
+		&i.CertSerial,
+		&i.CertNotBefore,
+		&i.CertNotAfter,
+		&i.CaName,
+		&i.OcspStatus,
+		&i.TspTime,
+		&i.SignFormat,
+		&i.QrUrl,
+		&i.PostprocessStatus,
+		&i.PostprocessError,
+		&i.PostprocessErrorCode,
+		&i.PostprocessAttempts,
+		&i.PostprocessNextAt,
+		&i.PostprocessStartedAt,
+	)
+	return i, err
+}
+
 const countSigningSessionDocumentsForRegistry = `-- name: CountSigningSessionDocumentsForRegistry :one
 SELECT count(*) FROM signing_session_documents ssd
 JOIN signing_sessions ss ON ss.id = ssd.session_id
@@ -83,7 +153,7 @@ INSERT INTO signing_session_documents (
 ) VALUES (
     $1, $2, $3, $4, $5, '', 'pending', $6, $7
 )
-RETURNING id, session_id, document_name, source_url, target_url, target_s3_key, content_hash, cached_s3_key, signed_s3_key, cms_s3_key, status, last_error, upload_attempts, signed_at, uploaded_at, created_at, hash_source, source_s3_bucket, source_s3_key, source_content_type, source_size_bytes, source_meta_hash, verification_status, verification_checked_at, verification_error, verification_attempts, verification_next_at, client_index, client_ref, signer_iin, signer_name, signer_bin, org_name, signer_type, basis, cert_serial, cert_not_before, cert_not_after, ca_name, ocsp_status, tsp_time, sign_format, qr_url
+RETURNING id, session_id, document_name, source_url, target_url, target_s3_key, content_hash, cached_s3_key, signed_s3_key, cms_s3_key, status, last_error, upload_attempts, signed_at, uploaded_at, created_at, hash_source, source_s3_bucket, source_s3_key, source_content_type, source_size_bytes, source_meta_hash, verification_status, verification_checked_at, verification_error, verification_attempts, verification_next_at, client_index, client_ref, signer_iin, signer_name, signer_bin, org_name, signer_type, basis, cert_serial, cert_not_before, cert_not_after, ca_name, ocsp_status, tsp_time, sign_format, qr_url, postprocess_status, postprocess_error, postprocess_error_code, postprocess_attempts, postprocess_next_at, postprocess_started_at
 `
 
 type CreateSigningSessionDocumentParams struct {
@@ -151,6 +221,12 @@ func (q *Queries) CreateSigningSessionDocument(ctx context.Context, arg CreateSi
 		&i.TspTime,
 		&i.SignFormat,
 		&i.QrUrl,
+		&i.PostprocessStatus,
+		&i.PostprocessError,
+		&i.PostprocessErrorCode,
+		&i.PostprocessAttempts,
+		&i.PostprocessNextAt,
+		&i.PostprocessStartedAt,
 	)
 	return i, err
 }
@@ -167,7 +243,7 @@ INSERT INTO signing_session_documents (
     $7, $8, $9, $10,
     'ready', $11, $12
 )
-RETURNING id, session_id, document_name, source_url, target_url, target_s3_key, content_hash, cached_s3_key, signed_s3_key, cms_s3_key, status, last_error, upload_attempts, signed_at, uploaded_at, created_at, hash_source, source_s3_bucket, source_s3_key, source_content_type, source_size_bytes, source_meta_hash, verification_status, verification_checked_at, verification_error, verification_attempts, verification_next_at, client_index, client_ref, signer_iin, signer_name, signer_bin, org_name, signer_type, basis, cert_serial, cert_not_before, cert_not_after, ca_name, ocsp_status, tsp_time, sign_format, qr_url
+RETURNING id, session_id, document_name, source_url, target_url, target_s3_key, content_hash, cached_s3_key, signed_s3_key, cms_s3_key, status, last_error, upload_attempts, signed_at, uploaded_at, created_at, hash_source, source_s3_bucket, source_s3_key, source_content_type, source_size_bytes, source_meta_hash, verification_status, verification_checked_at, verification_error, verification_attempts, verification_next_at, client_index, client_ref, signer_iin, signer_name, signer_bin, org_name, signer_type, basis, cert_serial, cert_not_before, cert_not_after, ca_name, ocsp_status, tsp_time, sign_format, qr_url, postprocess_status, postprocess_error, postprocess_error_code, postprocess_attempts, postprocess_next_at, postprocess_started_at
 `
 
 type CreateSigningSessionDocumentWithHashParams struct {
@@ -247,6 +323,12 @@ func (q *Queries) CreateSigningSessionDocumentWithHash(ctx context.Context, arg 
 		&i.TspTime,
 		&i.SignFormat,
 		&i.QrUrl,
+		&i.PostprocessStatus,
+		&i.PostprocessError,
+		&i.PostprocessErrorCode,
+		&i.PostprocessAttempts,
+		&i.PostprocessNextAt,
+		&i.PostprocessStartedAt,
 	)
 	return i, err
 }
@@ -295,7 +377,7 @@ func (q *Queries) GetExpiredSessions(ctx context.Context) ([]SigningSession, err
 }
 
 const getPendingFetchSessionDocuments = `-- name: GetPendingFetchSessionDocuments :many
-SELECT ssd.id, ssd.session_id, ssd.document_name, ssd.source_url, ssd.target_url, ssd.target_s3_key, ssd.content_hash, ssd.cached_s3_key, ssd.signed_s3_key, ssd.cms_s3_key, ssd.status, ssd.last_error, ssd.upload_attempts, ssd.signed_at, ssd.uploaded_at, ssd.created_at, ssd.hash_source, ssd.source_s3_bucket, ssd.source_s3_key, ssd.source_content_type, ssd.source_size_bytes, ssd.source_meta_hash, ssd.verification_status, ssd.verification_checked_at, ssd.verification_error, ssd.verification_attempts, ssd.verification_next_at, ssd.client_index, ssd.client_ref, ssd.signer_iin, ssd.signer_name, ssd.signer_bin, ssd.org_name, ssd.signer_type, ssd.basis, ssd.cert_serial, ssd.cert_not_before, ssd.cert_not_after, ssd.ca_name, ssd.ocsp_status, ssd.tsp_time, ssd.sign_format, ssd.qr_url FROM signing_session_documents ssd
+SELECT ssd.id, ssd.session_id, ssd.document_name, ssd.source_url, ssd.target_url, ssd.target_s3_key, ssd.content_hash, ssd.cached_s3_key, ssd.signed_s3_key, ssd.cms_s3_key, ssd.status, ssd.last_error, ssd.upload_attempts, ssd.signed_at, ssd.uploaded_at, ssd.created_at, ssd.hash_source, ssd.source_s3_bucket, ssd.source_s3_key, ssd.source_content_type, ssd.source_size_bytes, ssd.source_meta_hash, ssd.verification_status, ssd.verification_checked_at, ssd.verification_error, ssd.verification_attempts, ssd.verification_next_at, ssd.client_index, ssd.client_ref, ssd.signer_iin, ssd.signer_name, ssd.signer_bin, ssd.org_name, ssd.signer_type, ssd.basis, ssd.cert_serial, ssd.cert_not_before, ssd.cert_not_after, ssd.ca_name, ssd.ocsp_status, ssd.tsp_time, ssd.sign_format, ssd.qr_url, ssd.postprocess_status, ssd.postprocess_error, ssd.postprocess_error_code, ssd.postprocess_attempts, ssd.postprocess_next_at, ssd.postprocess_started_at FROM signing_session_documents ssd
 JOIN signing_sessions ss ON ss.id = ssd.session_id
 WHERE ssd.status = 'pending'
   AND ss.status NOT IN ('expired', 'failed', 'completed')
@@ -357,6 +439,12 @@ func (q *Queries) GetPendingFetchSessionDocuments(ctx context.Context) ([]Signin
 			&i.TspTime,
 			&i.SignFormat,
 			&i.QrUrl,
+			&i.PostprocessStatus,
+			&i.PostprocessError,
+			&i.PostprocessErrorCode,
+			&i.PostprocessAttempts,
+			&i.PostprocessNextAt,
+			&i.PostprocessStartedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -425,7 +513,7 @@ func (q *Queries) GetSigningSessionByID(ctx context.Context, id uuid.UUID) (Sign
 }
 
 const getSigningSessionDocument = `-- name: GetSigningSessionDocument :one
-SELECT id, session_id, document_name, source_url, target_url, target_s3_key, content_hash, cached_s3_key, signed_s3_key, cms_s3_key, status, last_error, upload_attempts, signed_at, uploaded_at, created_at, hash_source, source_s3_bucket, source_s3_key, source_content_type, source_size_bytes, source_meta_hash, verification_status, verification_checked_at, verification_error, verification_attempts, verification_next_at, client_index, client_ref, signer_iin, signer_name, signer_bin, org_name, signer_type, basis, cert_serial, cert_not_before, cert_not_after, ca_name, ocsp_status, tsp_time, sign_format, qr_url FROM signing_session_documents
+SELECT id, session_id, document_name, source_url, target_url, target_s3_key, content_hash, cached_s3_key, signed_s3_key, cms_s3_key, status, last_error, upload_attempts, signed_at, uploaded_at, created_at, hash_source, source_s3_bucket, source_s3_key, source_content_type, source_size_bytes, source_meta_hash, verification_status, verification_checked_at, verification_error, verification_attempts, verification_next_at, client_index, client_ref, signer_iin, signer_name, signer_bin, org_name, signer_type, basis, cert_serial, cert_not_before, cert_not_after, ca_name, ocsp_status, tsp_time, sign_format, qr_url, postprocess_status, postprocess_error, postprocess_error_code, postprocess_attempts, postprocess_next_at, postprocess_started_at FROM signing_session_documents
 WHERE id = $1
 `
 
@@ -476,6 +564,12 @@ func (q *Queries) GetSigningSessionDocument(ctx context.Context, id uuid.UUID) (
 		&i.TspTime,
 		&i.SignFormat,
 		&i.QrUrl,
+		&i.PostprocessStatus,
+		&i.PostprocessError,
+		&i.PostprocessErrorCode,
+		&i.PostprocessAttempts,
+		&i.PostprocessNextAt,
+		&i.PostprocessStartedAt,
 	)
 	return i, err
 }
@@ -484,7 +578,7 @@ const incrementSessionDocumentUploadAttempts = `-- name: IncrementSessionDocumen
 UPDATE signing_session_documents
 SET upload_attempts = upload_attempts + 1, last_error = $2
 WHERE id = $1
-RETURNING id, session_id, document_name, source_url, target_url, target_s3_key, content_hash, cached_s3_key, signed_s3_key, cms_s3_key, status, last_error, upload_attempts, signed_at, uploaded_at, created_at, hash_source, source_s3_bucket, source_s3_key, source_content_type, source_size_bytes, source_meta_hash, verification_status, verification_checked_at, verification_error, verification_attempts, verification_next_at, client_index, client_ref, signer_iin, signer_name, signer_bin, org_name, signer_type, basis, cert_serial, cert_not_before, cert_not_after, ca_name, ocsp_status, tsp_time, sign_format, qr_url
+RETURNING id, session_id, document_name, source_url, target_url, target_s3_key, content_hash, cached_s3_key, signed_s3_key, cms_s3_key, status, last_error, upload_attempts, signed_at, uploaded_at, created_at, hash_source, source_s3_bucket, source_s3_key, source_content_type, source_size_bytes, source_meta_hash, verification_status, verification_checked_at, verification_error, verification_attempts, verification_next_at, client_index, client_ref, signer_iin, signer_name, signer_bin, org_name, signer_type, basis, cert_serial, cert_not_before, cert_not_after, ca_name, ocsp_status, tsp_time, sign_format, qr_url, postprocess_status, postprocess_error, postprocess_error_code, postprocess_attempts, postprocess_next_at, postprocess_started_at
 `
 
 type IncrementSessionDocumentUploadAttemptsParams struct {
@@ -539,12 +633,103 @@ func (q *Queries) IncrementSessionDocumentUploadAttempts(ctx context.Context, ar
 		&i.TspTime,
 		&i.SignFormat,
 		&i.QrUrl,
+		&i.PostprocessStatus,
+		&i.PostprocessError,
+		&i.PostprocessErrorCode,
+		&i.PostprocessAttempts,
+		&i.PostprocessNextAt,
+		&i.PostprocessStartedAt,
 	)
 	return i, err
 }
 
+const listDocumentsDueForPostprocess = `-- name: ListDocumentsDueForPostprocess :many
+SELECT id, session_id, document_name, source_url, target_url, target_s3_key, content_hash, cached_s3_key, signed_s3_key, cms_s3_key, status, last_error, upload_attempts, signed_at, uploaded_at, created_at, hash_source, source_s3_bucket, source_s3_key, source_content_type, source_size_bytes, source_meta_hash, verification_status, verification_checked_at, verification_error, verification_attempts, verification_next_at, client_index, client_ref, signer_iin, signer_name, signer_bin, org_name, signer_type, basis, cert_serial, cert_not_before, cert_not_after, ca_name, ocsp_status, tsp_time, sign_format, qr_url, postprocess_status, postprocess_error, postprocess_error_code, postprocess_attempts, postprocess_next_at, postprocess_started_at FROM signing_session_documents
+WHERE postprocess_status IN ('queued', 'retrying')
+  AND postprocess_next_at <= now()
+ORDER BY postprocess_next_at
+LIMIT $1
+FOR UPDATE SKIP LOCKED
+`
+
+// Поллер (тот же паттерн, что ListDocumentsForVerification): подхватывает
+// джобы, у которых наступило время следующей попытки — страхует publish-сбой
+// и отсутствие бэкоффа у Nack(requeue=true) в RabbitMQ-консьюмере.
+func (q *Queries) ListDocumentsDueForPostprocess(ctx context.Context, limit int32) ([]SigningSessionDocument, error) {
+	rows, err := q.db.QueryContext(ctx, listDocumentsDueForPostprocess, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []SigningSessionDocument
+	for rows.Next() {
+		var i SigningSessionDocument
+		if err := rows.Scan(
+			&i.ID,
+			&i.SessionID,
+			&i.DocumentName,
+			&i.SourceUrl,
+			&i.TargetUrl,
+			&i.TargetS3Key,
+			&i.ContentHash,
+			&i.CachedS3Key,
+			&i.SignedS3Key,
+			&i.CmsS3Key,
+			&i.Status,
+			&i.LastError,
+			&i.UploadAttempts,
+			&i.SignedAt,
+			&i.UploadedAt,
+			&i.CreatedAt,
+			&i.HashSource,
+			&i.SourceS3Bucket,
+			&i.SourceS3Key,
+			&i.SourceContentType,
+			&i.SourceSizeBytes,
+			&i.SourceMetaHash,
+			&i.VerificationStatus,
+			&i.VerificationCheckedAt,
+			&i.VerificationError,
+			&i.VerificationAttempts,
+			&i.VerificationNextAt,
+			&i.ClientIndex,
+			&i.ClientRef,
+			&i.SignerIin,
+			&i.SignerName,
+			&i.SignerBin,
+			&i.OrgName,
+			&i.SignerType,
+			&i.Basis,
+			&i.CertSerial,
+			&i.CertNotBefore,
+			&i.CertNotAfter,
+			&i.CaName,
+			&i.OcspStatus,
+			&i.TspTime,
+			&i.SignFormat,
+			&i.QrUrl,
+			&i.PostprocessStatus,
+			&i.PostprocessError,
+			&i.PostprocessErrorCode,
+			&i.PostprocessAttempts,
+			&i.PostprocessNextAt,
+			&i.PostprocessStartedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listDocumentsForVerification = `-- name: ListDocumentsForVerification :many
-SELECT id, session_id, document_name, source_url, target_url, target_s3_key, content_hash, cached_s3_key, signed_s3_key, cms_s3_key, status, last_error, upload_attempts, signed_at, uploaded_at, created_at, hash_source, source_s3_bucket, source_s3_key, source_content_type, source_size_bytes, source_meta_hash, verification_status, verification_checked_at, verification_error, verification_attempts, verification_next_at, client_index, client_ref, signer_iin, signer_name, signer_bin, org_name, signer_type, basis, cert_serial, cert_not_before, cert_not_after, ca_name, ocsp_status, tsp_time, sign_format, qr_url FROM signing_session_documents
+SELECT id, session_id, document_name, source_url, target_url, target_s3_key, content_hash, cached_s3_key, signed_s3_key, cms_s3_key, status, last_error, upload_attempts, signed_at, uploaded_at, created_at, hash_source, source_s3_bucket, source_s3_key, source_content_type, source_size_bytes, source_meta_hash, verification_status, verification_checked_at, verification_error, verification_attempts, verification_next_at, client_index, client_ref, signer_iin, signer_name, signer_bin, org_name, signer_type, basis, cert_serial, cert_not_before, cert_not_after, ca_name, ocsp_status, tsp_time, sign_format, qr_url, postprocess_status, postprocess_error, postprocess_error_code, postprocess_attempts, postprocess_next_at, postprocess_started_at FROM signing_session_documents
 WHERE verification_status IN ('pending', 'retrying')
   AND verification_next_at <= now()
 ORDER BY verification_next_at
@@ -607,6 +792,12 @@ func (q *Queries) ListDocumentsForVerification(ctx context.Context, limit int32)
 			&i.TspTime,
 			&i.SignFormat,
 			&i.QrUrl,
+			&i.PostprocessStatus,
+			&i.PostprocessError,
+			&i.PostprocessErrorCode,
+			&i.PostprocessAttempts,
+			&i.PostprocessNextAt,
+			&i.PostprocessStartedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -622,7 +813,7 @@ func (q *Queries) ListDocumentsForVerification(ctx context.Context, limit int32)
 }
 
 const listReadySessionDocuments = `-- name: ListReadySessionDocuments :many
-SELECT id, session_id, document_name, source_url, target_url, target_s3_key, content_hash, cached_s3_key, signed_s3_key, cms_s3_key, status, last_error, upload_attempts, signed_at, uploaded_at, created_at, hash_source, source_s3_bucket, source_s3_key, source_content_type, source_size_bytes, source_meta_hash, verification_status, verification_checked_at, verification_error, verification_attempts, verification_next_at, client_index, client_ref, signer_iin, signer_name, signer_bin, org_name, signer_type, basis, cert_serial, cert_not_before, cert_not_after, ca_name, ocsp_status, tsp_time, sign_format, qr_url FROM signing_session_documents
+SELECT id, session_id, document_name, source_url, target_url, target_s3_key, content_hash, cached_s3_key, signed_s3_key, cms_s3_key, status, last_error, upload_attempts, signed_at, uploaded_at, created_at, hash_source, source_s3_bucket, source_s3_key, source_content_type, source_size_bytes, source_meta_hash, verification_status, verification_checked_at, verification_error, verification_attempts, verification_next_at, client_index, client_ref, signer_iin, signer_name, signer_bin, org_name, signer_type, basis, cert_serial, cert_not_before, cert_not_after, ca_name, ocsp_status, tsp_time, sign_format, qr_url, postprocess_status, postprocess_error, postprocess_error_code, postprocess_attempts, postprocess_next_at, postprocess_started_at FROM signing_session_documents
 WHERE session_id = $1 AND status = 'ready'
 ORDER BY client_index NULLS LAST, created_at
 `
@@ -680,6 +871,12 @@ func (q *Queries) ListReadySessionDocuments(ctx context.Context, sessionID uuid.
 			&i.TspTime,
 			&i.SignFormat,
 			&i.QrUrl,
+			&i.PostprocessStatus,
+			&i.PostprocessError,
+			&i.PostprocessErrorCode,
+			&i.PostprocessAttempts,
+			&i.PostprocessNextAt,
+			&i.PostprocessStartedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -695,7 +892,7 @@ func (q *Queries) ListReadySessionDocuments(ctx context.Context, sessionID uuid.
 }
 
 const listSessionDocuments = `-- name: ListSessionDocuments :many
-SELECT id, session_id, document_name, source_url, target_url, target_s3_key, content_hash, cached_s3_key, signed_s3_key, cms_s3_key, status, last_error, upload_attempts, signed_at, uploaded_at, created_at, hash_source, source_s3_bucket, source_s3_key, source_content_type, source_size_bytes, source_meta_hash, verification_status, verification_checked_at, verification_error, verification_attempts, verification_next_at, client_index, client_ref, signer_iin, signer_name, signer_bin, org_name, signer_type, basis, cert_serial, cert_not_before, cert_not_after, ca_name, ocsp_status, tsp_time, sign_format, qr_url FROM signing_session_documents
+SELECT id, session_id, document_name, source_url, target_url, target_s3_key, content_hash, cached_s3_key, signed_s3_key, cms_s3_key, status, last_error, upload_attempts, signed_at, uploaded_at, created_at, hash_source, source_s3_bucket, source_s3_key, source_content_type, source_size_bytes, source_meta_hash, verification_status, verification_checked_at, verification_error, verification_attempts, verification_next_at, client_index, client_ref, signer_iin, signer_name, signer_bin, org_name, signer_type, basis, cert_serial, cert_not_before, cert_not_after, ca_name, ocsp_status, tsp_time, sign_format, qr_url, postprocess_status, postprocess_error, postprocess_error_code, postprocess_attempts, postprocess_next_at, postprocess_started_at FROM signing_session_documents
 WHERE session_id = $1
 ORDER BY client_index NULLS LAST, created_at
 `
@@ -756,6 +953,12 @@ func (q *Queries) ListSessionDocuments(ctx context.Context, sessionID uuid.UUID)
 			&i.TspTime,
 			&i.SignFormat,
 			&i.QrUrl,
+			&i.PostprocessStatus,
+			&i.PostprocessError,
+			&i.PostprocessErrorCode,
+			&i.PostprocessAttempts,
+			&i.PostprocessNextAt,
+			&i.PostprocessStartedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -771,7 +974,7 @@ func (q *Queries) ListSessionDocuments(ctx context.Context, sessionID uuid.UUID)
 }
 
 const listSigningSessionDocumentsForRegistry = `-- name: ListSigningSessionDocumentsForRegistry :many
-SELECT ssd.id, ssd.session_id, ssd.document_name, ssd.source_url, ssd.target_url, ssd.target_s3_key, ssd.content_hash, ssd.cached_s3_key, ssd.signed_s3_key, ssd.cms_s3_key, ssd.status, ssd.last_error, ssd.upload_attempts, ssd.signed_at, ssd.uploaded_at, ssd.created_at, ssd.hash_source, ssd.source_s3_bucket, ssd.source_s3_key, ssd.source_content_type, ssd.source_size_bytes, ssd.source_meta_hash, ssd.verification_status, ssd.verification_checked_at, ssd.verification_error, ssd.verification_attempts, ssd.verification_next_at, ssd.client_index, ssd.client_ref, ssd.signer_iin, ssd.signer_name, ssd.signer_bin, ssd.org_name, ssd.signer_type, ssd.basis, ssd.cert_serial, ssd.cert_not_before, ssd.cert_not_after, ssd.ca_name, ssd.ocsp_status, ssd.tsp_time, ssd.sign_format, ssd.qr_url, ss.tenant_id AS tenant_id, ss.application_id AS application_id,
+SELECT ssd.id, ssd.session_id, ssd.document_name, ssd.source_url, ssd.target_url, ssd.target_s3_key, ssd.content_hash, ssd.cached_s3_key, ssd.signed_s3_key, ssd.cms_s3_key, ssd.status, ssd.last_error, ssd.upload_attempts, ssd.signed_at, ssd.uploaded_at, ssd.created_at, ssd.hash_source, ssd.source_s3_bucket, ssd.source_s3_key, ssd.source_content_type, ssd.source_size_bytes, ssd.source_meta_hash, ssd.verification_status, ssd.verification_checked_at, ssd.verification_error, ssd.verification_attempts, ssd.verification_next_at, ssd.client_index, ssd.client_ref, ssd.signer_iin, ssd.signer_name, ssd.signer_bin, ssd.org_name, ssd.signer_type, ssd.basis, ssd.cert_serial, ssd.cert_not_before, ssd.cert_not_after, ssd.ca_name, ssd.ocsp_status, ssd.tsp_time, ssd.sign_format, ssd.qr_url, ssd.postprocess_status, ssd.postprocess_error, ssd.postprocess_error_code, ssd.postprocess_attempts, ssd.postprocess_next_at, ssd.postprocess_started_at, ss.tenant_id AS tenant_id, ss.application_id AS application_id,
        ss.status AS session_status, ss.expires_at AS session_expires_at
 FROM signing_session_documents ssd
 JOIN signing_sessions ss ON ss.id = ssd.session_id
@@ -832,6 +1035,12 @@ type ListSigningSessionDocumentsForRegistryRow struct {
 	TspTime               sql.NullTime   `json:"tsp_time"`
 	SignFormat            sql.NullString `json:"sign_format"`
 	QrUrl                 sql.NullString `json:"qr_url"`
+	PostprocessStatus     sql.NullString `json:"postprocess_status"`
+	PostprocessError      sql.NullString `json:"postprocess_error"`
+	PostprocessErrorCode  sql.NullString `json:"postprocess_error_code"`
+	PostprocessAttempts   int32          `json:"postprocess_attempts"`
+	PostprocessNextAt     sql.NullTime   `json:"postprocess_next_at"`
+	PostprocessStartedAt  sql.NullTime   `json:"postprocess_started_at"`
 	TenantID              uuid.UUID      `json:"tenant_id"`
 	ApplicationID         sql.NullString `json:"application_id"`
 	SessionStatus         string         `json:"session_status"`
@@ -899,6 +1108,12 @@ func (q *Queries) ListSigningSessionDocumentsForRegistry(ctx context.Context, ar
 			&i.TspTime,
 			&i.SignFormat,
 			&i.QrUrl,
+			&i.PostprocessStatus,
+			&i.PostprocessError,
+			&i.PostprocessErrorCode,
+			&i.PostprocessAttempts,
+			&i.PostprocessNextAt,
+			&i.PostprocessStartedAt,
 			&i.TenantID,
 			&i.ApplicationID,
 			&i.SessionStatus,
@@ -917,6 +1132,250 @@ func (q *Queries) ListSigningSessionDocumentsForRegistry(ctx context.Context, ar
 	return items, nil
 }
 
+const markSessionDocumentPostprocessDone = `-- name: MarkSessionDocumentPostprocessDone :one
+UPDATE signing_session_documents
+SET status = 'uploaded', uploaded_at = now(), postprocess_status = 'done'
+WHERE id = $1
+RETURNING id, session_id, document_name, source_url, target_url, target_s3_key, content_hash, cached_s3_key, signed_s3_key, cms_s3_key, status, last_error, upload_attempts, signed_at, uploaded_at, created_at, hash_source, source_s3_bucket, source_s3_key, source_content_type, source_size_bytes, source_meta_hash, verification_status, verification_checked_at, verification_error, verification_attempts, verification_next_at, client_index, client_ref, signer_iin, signer_name, signer_bin, org_name, signer_type, basis, cert_serial, cert_not_before, cert_not_after, ca_name, ocsp_status, tsp_time, sign_format, qr_url, postprocess_status, postprocess_error, postprocess_error_code, postprocess_attempts, postprocess_next_at, postprocess_started_at
+`
+
+func (q *Queries) MarkSessionDocumentPostprocessDone(ctx context.Context, id uuid.UUID) (SigningSessionDocument, error) {
+	row := q.db.QueryRowContext(ctx, markSessionDocumentPostprocessDone, id)
+	var i SigningSessionDocument
+	err := row.Scan(
+		&i.ID,
+		&i.SessionID,
+		&i.DocumentName,
+		&i.SourceUrl,
+		&i.TargetUrl,
+		&i.TargetS3Key,
+		&i.ContentHash,
+		&i.CachedS3Key,
+		&i.SignedS3Key,
+		&i.CmsS3Key,
+		&i.Status,
+		&i.LastError,
+		&i.UploadAttempts,
+		&i.SignedAt,
+		&i.UploadedAt,
+		&i.CreatedAt,
+		&i.HashSource,
+		&i.SourceS3Bucket,
+		&i.SourceS3Key,
+		&i.SourceContentType,
+		&i.SourceSizeBytes,
+		&i.SourceMetaHash,
+		&i.VerificationStatus,
+		&i.VerificationCheckedAt,
+		&i.VerificationError,
+		&i.VerificationAttempts,
+		&i.VerificationNextAt,
+		&i.ClientIndex,
+		&i.ClientRef,
+		&i.SignerIin,
+		&i.SignerName,
+		&i.SignerBin,
+		&i.OrgName,
+		&i.SignerType,
+		&i.Basis,
+		&i.CertSerial,
+		&i.CertNotBefore,
+		&i.CertNotAfter,
+		&i.CaName,
+		&i.OcspStatus,
+		&i.TspTime,
+		&i.SignFormat,
+		&i.QrUrl,
+		&i.PostprocessStatus,
+		&i.PostprocessError,
+		&i.PostprocessErrorCode,
+		&i.PostprocessAttempts,
+		&i.PostprocessNextAt,
+		&i.PostprocessStartedAt,
+	)
+	return i, err
+}
+
+const markSessionDocumentPostprocessFailed = `-- name: MarkSessionDocumentPostprocessFailed :one
+UPDATE signing_session_documents
+SET postprocess_status = 'failed',
+    postprocess_attempts = postprocess_attempts + 1,
+    postprocess_error = $2,
+    postprocess_error_code = $3,
+    postprocess_next_at = NULL,
+    status = 'post_process_failed',
+    last_error = $2
+WHERE id = $1
+RETURNING id, session_id, document_name, source_url, target_url, target_s3_key, content_hash, cached_s3_key, signed_s3_key, cms_s3_key, status, last_error, upload_attempts, signed_at, uploaded_at, created_at, hash_source, source_s3_bucket, source_s3_key, source_content_type, source_size_bytes, source_meta_hash, verification_status, verification_checked_at, verification_error, verification_attempts, verification_next_at, client_index, client_ref, signer_iin, signer_name, signer_bin, org_name, signer_type, basis, cert_serial, cert_not_before, cert_not_after, ca_name, ocsp_status, tsp_time, sign_format, qr_url, postprocess_status, postprocess_error, postprocess_error_code, postprocess_attempts, postprocess_next_at, postprocess_started_at
+`
+
+type MarkSessionDocumentPostprocessFailedParams struct {
+	ID                   uuid.UUID      `json:"id"`
+	PostprocessError     sql.NullString `json:"postprocess_error"`
+	PostprocessErrorCode sql.NullString `json:"postprocess_error_code"`
+}
+
+// Терминальный провал: попытки исчерпаны. status='post_process_failed' —
+// отдельное значение от upload_failed/fetch_failed, чтобы отличать провал на
+// этапе фонового постпроцессинга от старых причин отказа.
+func (q *Queries) MarkSessionDocumentPostprocessFailed(ctx context.Context, arg MarkSessionDocumentPostprocessFailedParams) (SigningSessionDocument, error) {
+	row := q.db.QueryRowContext(ctx, markSessionDocumentPostprocessFailed, arg.ID, arg.PostprocessError, arg.PostprocessErrorCode)
+	var i SigningSessionDocument
+	err := row.Scan(
+		&i.ID,
+		&i.SessionID,
+		&i.DocumentName,
+		&i.SourceUrl,
+		&i.TargetUrl,
+		&i.TargetS3Key,
+		&i.ContentHash,
+		&i.CachedS3Key,
+		&i.SignedS3Key,
+		&i.CmsS3Key,
+		&i.Status,
+		&i.LastError,
+		&i.UploadAttempts,
+		&i.SignedAt,
+		&i.UploadedAt,
+		&i.CreatedAt,
+		&i.HashSource,
+		&i.SourceS3Bucket,
+		&i.SourceS3Key,
+		&i.SourceContentType,
+		&i.SourceSizeBytes,
+		&i.SourceMetaHash,
+		&i.VerificationStatus,
+		&i.VerificationCheckedAt,
+		&i.VerificationError,
+		&i.VerificationAttempts,
+		&i.VerificationNextAt,
+		&i.ClientIndex,
+		&i.ClientRef,
+		&i.SignerIin,
+		&i.SignerName,
+		&i.SignerBin,
+		&i.OrgName,
+		&i.SignerType,
+		&i.Basis,
+		&i.CertSerial,
+		&i.CertNotBefore,
+		&i.CertNotAfter,
+		&i.CaName,
+		&i.OcspStatus,
+		&i.TspTime,
+		&i.SignFormat,
+		&i.QrUrl,
+		&i.PostprocessStatus,
+		&i.PostprocessError,
+		&i.PostprocessErrorCode,
+		&i.PostprocessAttempts,
+		&i.PostprocessNextAt,
+		&i.PostprocessStartedAt,
+	)
+	return i, err
+}
+
+const markSessionDocumentPostprocessRetrying = `-- name: MarkSessionDocumentPostprocessRetrying :exec
+UPDATE signing_session_documents
+SET postprocess_status = 'retrying',
+    postprocess_attempts = postprocess_attempts + 1,
+    postprocess_error = $2,
+    postprocess_error_code = $3,
+    postprocess_next_at = $4,
+    last_error = $2
+WHERE id = $1
+`
+
+type MarkSessionDocumentPostprocessRetryingParams struct {
+	ID                   uuid.UUID      `json:"id"`
+	PostprocessError     sql.NullString `json:"postprocess_error"`
+	PostprocessErrorCode sql.NullString `json:"postprocess_error_code"`
+	PostprocessNextAt    sql.NullTime   `json:"postprocess_next_at"`
+}
+
+func (q *Queries) MarkSessionDocumentPostprocessRetrying(ctx context.Context, arg MarkSessionDocumentPostprocessRetryingParams) error {
+	_, err := q.db.ExecContext(ctx, markSessionDocumentPostprocessRetrying,
+		arg.ID,
+		arg.PostprocessError,
+		arg.PostprocessErrorCode,
+		arg.PostprocessNextAt,
+	)
+	return err
+}
+
+const markSessionDocumentSigned = `-- name: MarkSessionDocumentSigned :one
+UPDATE signing_session_documents
+SET cms_s3_key = $2, status = 'signed', signed_at = now(),
+    postprocess_status = 'queued', postprocess_attempts = 0, postprocess_next_at = now()
+WHERE id = $1
+RETURNING id, session_id, document_name, source_url, target_url, target_s3_key, content_hash, cached_s3_key, signed_s3_key, cms_s3_key, status, last_error, upload_attempts, signed_at, uploaded_at, created_at, hash_source, source_s3_bucket, source_s3_key, source_content_type, source_size_bytes, source_meta_hash, verification_status, verification_checked_at, verification_error, verification_attempts, verification_next_at, client_index, client_ref, signer_iin, signer_name, signer_bin, org_name, signer_type, basis, cert_serial, cert_not_before, cert_not_after, ca_name, ocsp_status, tsp_time, sign_format, qr_url, postprocess_status, postprocess_error, postprocess_error_code, postprocess_attempts, postprocess_next_at, postprocess_started_at
+`
+
+type MarkSessionDocumentSignedParams struct {
+	ID       uuid.UUID      `json:"id"`
+	CmsS3Key sql.NullString `json:"cms_s3_key"`
+}
+
+// Быстрый синхронный путь: NCANode уже подтвердил CMS, CMS-архив уже залит.
+// Документ юридически подписан, но артефакт (QR-штамп + Лист подписей) ещё
+// не собран — это ставится в очередь постпроцессинга (postprocess_status).
+func (q *Queries) MarkSessionDocumentSigned(ctx context.Context, arg MarkSessionDocumentSignedParams) (SigningSessionDocument, error) {
+	row := q.db.QueryRowContext(ctx, markSessionDocumentSigned, arg.ID, arg.CmsS3Key)
+	var i SigningSessionDocument
+	err := row.Scan(
+		&i.ID,
+		&i.SessionID,
+		&i.DocumentName,
+		&i.SourceUrl,
+		&i.TargetUrl,
+		&i.TargetS3Key,
+		&i.ContentHash,
+		&i.CachedS3Key,
+		&i.SignedS3Key,
+		&i.CmsS3Key,
+		&i.Status,
+		&i.LastError,
+		&i.UploadAttempts,
+		&i.SignedAt,
+		&i.UploadedAt,
+		&i.CreatedAt,
+		&i.HashSource,
+		&i.SourceS3Bucket,
+		&i.SourceS3Key,
+		&i.SourceContentType,
+		&i.SourceSizeBytes,
+		&i.SourceMetaHash,
+		&i.VerificationStatus,
+		&i.VerificationCheckedAt,
+		&i.VerificationError,
+		&i.VerificationAttempts,
+		&i.VerificationNextAt,
+		&i.ClientIndex,
+		&i.ClientRef,
+		&i.SignerIin,
+		&i.SignerName,
+		&i.SignerBin,
+		&i.OrgName,
+		&i.SignerType,
+		&i.Basis,
+		&i.CertSerial,
+		&i.CertNotBefore,
+		&i.CertNotAfter,
+		&i.CaName,
+		&i.OcspStatus,
+		&i.TspTime,
+		&i.SignFormat,
+		&i.QrUrl,
+		&i.PostprocessStatus,
+		&i.PostprocessError,
+		&i.PostprocessErrorCode,
+		&i.PostprocessAttempts,
+		&i.PostprocessNextAt,
+		&i.PostprocessStartedAt,
+	)
+	return i, err
+}
+
 const markSessionDocumentTampered = `-- name: MarkSessionDocumentTampered :one
 UPDATE signing_session_documents
 SET status = 'fetch_failed',
@@ -924,7 +1383,7 @@ SET status = 'fetch_failed',
     verification_error = $2,
     verification_checked_at = now()
 WHERE id = $1
-RETURNING id, session_id, document_name, source_url, target_url, target_s3_key, content_hash, cached_s3_key, signed_s3_key, cms_s3_key, status, last_error, upload_attempts, signed_at, uploaded_at, created_at, hash_source, source_s3_bucket, source_s3_key, source_content_type, source_size_bytes, source_meta_hash, verification_status, verification_checked_at, verification_error, verification_attempts, verification_next_at, client_index, client_ref, signer_iin, signer_name, signer_bin, org_name, signer_type, basis, cert_serial, cert_not_before, cert_not_after, ca_name, ocsp_status, tsp_time, sign_format, qr_url
+RETURNING id, session_id, document_name, source_url, target_url, target_s3_key, content_hash, cached_s3_key, signed_s3_key, cms_s3_key, status, last_error, upload_attempts, signed_at, uploaded_at, created_at, hash_source, source_s3_bucket, source_s3_key, source_content_type, source_size_bytes, source_meta_hash, verification_status, verification_checked_at, verification_error, verification_attempts, verification_next_at, client_index, client_ref, signer_iin, signer_name, signer_bin, org_name, signer_type, basis, cert_serial, cert_not_before, cert_not_after, ca_name, ocsp_status, tsp_time, sign_format, qr_url, postprocess_status, postprocess_error, postprocess_error_code, postprocess_attempts, postprocess_next_at, postprocess_started_at
 `
 
 type MarkSessionDocumentTamperedParams struct {
@@ -981,6 +1440,12 @@ func (q *Queries) MarkSessionDocumentTampered(ctx context.Context, arg MarkSessi
 		&i.TspTime,
 		&i.SignFormat,
 		&i.QrUrl,
+		&i.PostprocessStatus,
+		&i.PostprocessError,
+		&i.PostprocessErrorCode,
+		&i.PostprocessAttempts,
+		&i.PostprocessNextAt,
+		&i.PostprocessStartedAt,
 	)
 	return i, err
 }
@@ -989,7 +1454,7 @@ const markSessionDocumentUploaded = `-- name: MarkSessionDocumentUploaded :one
 UPDATE signing_session_documents
 SET status = 'uploaded', uploaded_at = now()
 WHERE id = $1
-RETURNING id, session_id, document_name, source_url, target_url, target_s3_key, content_hash, cached_s3_key, signed_s3_key, cms_s3_key, status, last_error, upload_attempts, signed_at, uploaded_at, created_at, hash_source, source_s3_bucket, source_s3_key, source_content_type, source_size_bytes, source_meta_hash, verification_status, verification_checked_at, verification_error, verification_attempts, verification_next_at, client_index, client_ref, signer_iin, signer_name, signer_bin, org_name, signer_type, basis, cert_serial, cert_not_before, cert_not_after, ca_name, ocsp_status, tsp_time, sign_format, qr_url
+RETURNING id, session_id, document_name, source_url, target_url, target_s3_key, content_hash, cached_s3_key, signed_s3_key, cms_s3_key, status, last_error, upload_attempts, signed_at, uploaded_at, created_at, hash_source, source_s3_bucket, source_s3_key, source_content_type, source_size_bytes, source_meta_hash, verification_status, verification_checked_at, verification_error, verification_attempts, verification_next_at, client_index, client_ref, signer_iin, signer_name, signer_bin, org_name, signer_type, basis, cert_serial, cert_not_before, cert_not_after, ca_name, ocsp_status, tsp_time, sign_format, qr_url, postprocess_status, postprocess_error, postprocess_error_code, postprocess_attempts, postprocess_next_at, postprocess_started_at
 `
 
 func (q *Queries) MarkSessionDocumentUploaded(ctx context.Context, id uuid.UUID) (SigningSessionDocument, error) {
@@ -1039,6 +1504,12 @@ func (q *Queries) MarkSessionDocumentUploaded(ctx context.Context, id uuid.UUID)
 		&i.TspTime,
 		&i.SignFormat,
 		&i.QrUrl,
+		&i.PostprocessStatus,
+		&i.PostprocessError,
+		&i.PostprocessErrorCode,
+		&i.PostprocessAttempts,
+		&i.PostprocessNextAt,
+		&i.PostprocessStartedAt,
 	)
 	return i, err
 }
@@ -1090,7 +1561,7 @@ const resetSessionDocumentForRetry = `-- name: ResetSessionDocumentForRetry :one
 UPDATE signing_session_documents
 SET status = 'signed', upload_attempts = 0, last_error = NULL, target_url = $2
 WHERE id = $1
-RETURNING id, session_id, document_name, source_url, target_url, target_s3_key, content_hash, cached_s3_key, signed_s3_key, cms_s3_key, status, last_error, upload_attempts, signed_at, uploaded_at, created_at, hash_source, source_s3_bucket, source_s3_key, source_content_type, source_size_bytes, source_meta_hash, verification_status, verification_checked_at, verification_error, verification_attempts, verification_next_at, client_index, client_ref, signer_iin, signer_name, signer_bin, org_name, signer_type, basis, cert_serial, cert_not_before, cert_not_after, ca_name, ocsp_status, tsp_time, sign_format, qr_url
+RETURNING id, session_id, document_name, source_url, target_url, target_s3_key, content_hash, cached_s3_key, signed_s3_key, cms_s3_key, status, last_error, upload_attempts, signed_at, uploaded_at, created_at, hash_source, source_s3_bucket, source_s3_key, source_content_type, source_size_bytes, source_meta_hash, verification_status, verification_checked_at, verification_error, verification_attempts, verification_next_at, client_index, client_ref, signer_iin, signer_name, signer_bin, org_name, signer_type, basis, cert_serial, cert_not_before, cert_not_after, ca_name, ocsp_status, tsp_time, sign_format, qr_url, postprocess_status, postprocess_error, postprocess_error_code, postprocess_attempts, postprocess_next_at, postprocess_started_at
 `
 
 type ResetSessionDocumentForRetryParams struct {
@@ -1145,8 +1616,33 @@ func (q *Queries) ResetSessionDocumentForRetry(ctx context.Context, arg ResetSes
 		&i.TspTime,
 		&i.SignFormat,
 		&i.QrUrl,
+		&i.PostprocessStatus,
+		&i.PostprocessError,
+		&i.PostprocessErrorCode,
+		&i.PostprocessAttempts,
+		&i.PostprocessNextAt,
+		&i.PostprocessStartedAt,
 	)
 	return i, err
+}
+
+const setSessionDocumentSignedS3Key = `-- name: SetSessionDocumentSignedS3Key :exec
+UPDATE signing_session_documents
+SET signed_s3_key = $2
+WHERE id = $1
+`
+
+type SetSessionDocumentSignedS3KeyParams struct {
+	ID          uuid.UUID      `json:"id"`
+	SignedS3Key sql.NullString `json:"signed_s3_key"`
+}
+
+// Пишется сразу после успешной загрузки собранного PDF во внутренний MinIO,
+// независимо от статуса всей джобы — позволяет ретраю пропустить повторную
+// pdfcpu-сборку, если процесс упал уже после этого шага.
+func (q *Queries) SetSessionDocumentSignedS3Key(ctx context.Context, arg SetSessionDocumentSignedS3KeyParams) error {
+	_, err := q.db.ExecContext(ctx, setSessionDocumentSignedS3Key, arg.ID, arg.SignedS3Key)
+	return err
 }
 
 const updateDocumentVerification = `-- name: UpdateDocumentVerification :exec
@@ -1185,7 +1681,7 @@ const updateSessionDocumentAfterFetch = `-- name: UpdateSessionDocumentAfterFetc
 UPDATE signing_session_documents
 SET content_hash = $2, cached_s3_key = $3, status = 'ready'
 WHERE id = $1
-RETURNING id, session_id, document_name, source_url, target_url, target_s3_key, content_hash, cached_s3_key, signed_s3_key, cms_s3_key, status, last_error, upload_attempts, signed_at, uploaded_at, created_at, hash_source, source_s3_bucket, source_s3_key, source_content_type, source_size_bytes, source_meta_hash, verification_status, verification_checked_at, verification_error, verification_attempts, verification_next_at, client_index, client_ref, signer_iin, signer_name, signer_bin, org_name, signer_type, basis, cert_serial, cert_not_before, cert_not_after, ca_name, ocsp_status, tsp_time, sign_format, qr_url
+RETURNING id, session_id, document_name, source_url, target_url, target_s3_key, content_hash, cached_s3_key, signed_s3_key, cms_s3_key, status, last_error, upload_attempts, signed_at, uploaded_at, created_at, hash_source, source_s3_bucket, source_s3_key, source_content_type, source_size_bytes, source_meta_hash, verification_status, verification_checked_at, verification_error, verification_attempts, verification_next_at, client_index, client_ref, signer_iin, signer_name, signer_bin, org_name, signer_type, basis, cert_serial, cert_not_before, cert_not_after, ca_name, ocsp_status, tsp_time, sign_format, qr_url, postprocess_status, postprocess_error, postprocess_error_code, postprocess_attempts, postprocess_next_at, postprocess_started_at
 `
 
 type UpdateSessionDocumentAfterFetchParams struct {
@@ -1242,6 +1738,12 @@ func (q *Queries) UpdateSessionDocumentAfterFetch(ctx context.Context, arg Updat
 		&i.TspTime,
 		&i.SignFormat,
 		&i.QrUrl,
+		&i.PostprocessStatus,
+		&i.PostprocessError,
+		&i.PostprocessErrorCode,
+		&i.PostprocessAttempts,
+		&i.PostprocessNextAt,
+		&i.PostprocessStartedAt,
 	)
 	return i, err
 }
@@ -1250,7 +1752,7 @@ const updateSessionDocumentAfterFetchKeepHash = `-- name: UpdateSessionDocumentA
 UPDATE signing_session_documents
 SET cached_s3_key = $2, status = 'ready'
 WHERE id = $1
-RETURNING id, session_id, document_name, source_url, target_url, target_s3_key, content_hash, cached_s3_key, signed_s3_key, cms_s3_key, status, last_error, upload_attempts, signed_at, uploaded_at, created_at, hash_source, source_s3_bucket, source_s3_key, source_content_type, source_size_bytes, source_meta_hash, verification_status, verification_checked_at, verification_error, verification_attempts, verification_next_at, client_index, client_ref, signer_iin, signer_name, signer_bin, org_name, signer_type, basis, cert_serial, cert_not_before, cert_not_after, ca_name, ocsp_status, tsp_time, sign_format, qr_url
+RETURNING id, session_id, document_name, source_url, target_url, target_s3_key, content_hash, cached_s3_key, signed_s3_key, cms_s3_key, status, last_error, upload_attempts, signed_at, uploaded_at, created_at, hash_source, source_s3_bucket, source_s3_key, source_content_type, source_size_bytes, source_meta_hash, verification_status, verification_checked_at, verification_error, verification_attempts, verification_next_at, client_index, client_ref, signer_iin, signer_name, signer_bin, org_name, signer_type, basis, cert_serial, cert_not_before, cert_not_after, ca_name, ocsp_status, tsp_time, sign_format, qr_url, postprocess_status, postprocess_error, postprocess_error_code, postprocess_attempts, postprocess_next_at, postprocess_started_at
 `
 
 type UpdateSessionDocumentAfterFetchKeepHashParams struct {
@@ -1306,70 +1808,12 @@ func (q *Queries) UpdateSessionDocumentAfterFetchKeepHash(ctx context.Context, a
 		&i.TspTime,
 		&i.SignFormat,
 		&i.QrUrl,
-	)
-	return i, err
-}
-
-const updateSessionDocumentAfterSign = `-- name: UpdateSessionDocumentAfterSign :one
-UPDATE signing_session_documents
-SET cms_s3_key = $2, signed_s3_key = $3, status = 'signed', signed_at = now()
-WHERE id = $1
-RETURNING id, session_id, document_name, source_url, target_url, target_s3_key, content_hash, cached_s3_key, signed_s3_key, cms_s3_key, status, last_error, upload_attempts, signed_at, uploaded_at, created_at, hash_source, source_s3_bucket, source_s3_key, source_content_type, source_size_bytes, source_meta_hash, verification_status, verification_checked_at, verification_error, verification_attempts, verification_next_at, client_index, client_ref, signer_iin, signer_name, signer_bin, org_name, signer_type, basis, cert_serial, cert_not_before, cert_not_after, ca_name, ocsp_status, tsp_time, sign_format, qr_url
-`
-
-type UpdateSessionDocumentAfterSignParams struct {
-	ID          uuid.UUID      `json:"id"`
-	CmsS3Key    sql.NullString `json:"cms_s3_key"`
-	SignedS3Key sql.NullString `json:"signed_s3_key"`
-}
-
-func (q *Queries) UpdateSessionDocumentAfterSign(ctx context.Context, arg UpdateSessionDocumentAfterSignParams) (SigningSessionDocument, error) {
-	row := q.db.QueryRowContext(ctx, updateSessionDocumentAfterSign, arg.ID, arg.CmsS3Key, arg.SignedS3Key)
-	var i SigningSessionDocument
-	err := row.Scan(
-		&i.ID,
-		&i.SessionID,
-		&i.DocumentName,
-		&i.SourceUrl,
-		&i.TargetUrl,
-		&i.TargetS3Key,
-		&i.ContentHash,
-		&i.CachedS3Key,
-		&i.SignedS3Key,
-		&i.CmsS3Key,
-		&i.Status,
-		&i.LastError,
-		&i.UploadAttempts,
-		&i.SignedAt,
-		&i.UploadedAt,
-		&i.CreatedAt,
-		&i.HashSource,
-		&i.SourceS3Bucket,
-		&i.SourceS3Key,
-		&i.SourceContentType,
-		&i.SourceSizeBytes,
-		&i.SourceMetaHash,
-		&i.VerificationStatus,
-		&i.VerificationCheckedAt,
-		&i.VerificationError,
-		&i.VerificationAttempts,
-		&i.VerificationNextAt,
-		&i.ClientIndex,
-		&i.ClientRef,
-		&i.SignerIin,
-		&i.SignerName,
-		&i.SignerBin,
-		&i.OrgName,
-		&i.SignerType,
-		&i.Basis,
-		&i.CertSerial,
-		&i.CertNotBefore,
-		&i.CertNotAfter,
-		&i.CaName,
-		&i.OcspStatus,
-		&i.TspTime,
-		&i.SignFormat,
-		&i.QrUrl,
+		&i.PostprocessStatus,
+		&i.PostprocessError,
+		&i.PostprocessErrorCode,
+		&i.PostprocessAttempts,
+		&i.PostprocessNextAt,
+		&i.PostprocessStartedAt,
 	)
 	return i, err
 }
@@ -1381,7 +1825,7 @@ SET signer_iin = $2, signer_name = $3, signer_bin = $4, org_name = $5,
     cert_not_after = $10, ca_name = $11, ocsp_status = $12, tsp_time = $13,
     sign_format = $14, qr_url = $15
 WHERE id = $1
-RETURNING id, session_id, document_name, source_url, target_url, target_s3_key, content_hash, cached_s3_key, signed_s3_key, cms_s3_key, status, last_error, upload_attempts, signed_at, uploaded_at, created_at, hash_source, source_s3_bucket, source_s3_key, source_content_type, source_size_bytes, source_meta_hash, verification_status, verification_checked_at, verification_error, verification_attempts, verification_next_at, client_index, client_ref, signer_iin, signer_name, signer_bin, org_name, signer_type, basis, cert_serial, cert_not_before, cert_not_after, ca_name, ocsp_status, tsp_time, sign_format, qr_url
+RETURNING id, session_id, document_name, source_url, target_url, target_s3_key, content_hash, cached_s3_key, signed_s3_key, cms_s3_key, status, last_error, upload_attempts, signed_at, uploaded_at, created_at, hash_source, source_s3_bucket, source_s3_key, source_content_type, source_size_bytes, source_meta_hash, verification_status, verification_checked_at, verification_error, verification_attempts, verification_next_at, client_index, client_ref, signer_iin, signer_name, signer_bin, org_name, signer_type, basis, cert_serial, cert_not_before, cert_not_after, ca_name, ocsp_status, tsp_time, sign_format, qr_url, postprocess_status, postprocess_error, postprocess_error_code, postprocess_attempts, postprocess_next_at, postprocess_started_at
 `
 
 type UpdateSessionDocumentSignerInfoParams struct {
@@ -1467,6 +1911,12 @@ func (q *Queries) UpdateSessionDocumentSignerInfo(ctx context.Context, arg Updat
 		&i.TspTime,
 		&i.SignFormat,
 		&i.QrUrl,
+		&i.PostprocessStatus,
+		&i.PostprocessError,
+		&i.PostprocessErrorCode,
+		&i.PostprocessAttempts,
+		&i.PostprocessNextAt,
+		&i.PostprocessStartedAt,
 	)
 	return i, err
 }
@@ -1475,7 +1925,7 @@ const updateSessionDocumentStatus = `-- name: UpdateSessionDocumentStatus :one
 UPDATE signing_session_documents
 SET status = $2, last_error = $3
 WHERE id = $1
-RETURNING id, session_id, document_name, source_url, target_url, target_s3_key, content_hash, cached_s3_key, signed_s3_key, cms_s3_key, status, last_error, upload_attempts, signed_at, uploaded_at, created_at, hash_source, source_s3_bucket, source_s3_key, source_content_type, source_size_bytes, source_meta_hash, verification_status, verification_checked_at, verification_error, verification_attempts, verification_next_at, client_index, client_ref, signer_iin, signer_name, signer_bin, org_name, signer_type, basis, cert_serial, cert_not_before, cert_not_after, ca_name, ocsp_status, tsp_time, sign_format, qr_url
+RETURNING id, session_id, document_name, source_url, target_url, target_s3_key, content_hash, cached_s3_key, signed_s3_key, cms_s3_key, status, last_error, upload_attempts, signed_at, uploaded_at, created_at, hash_source, source_s3_bucket, source_s3_key, source_content_type, source_size_bytes, source_meta_hash, verification_status, verification_checked_at, verification_error, verification_attempts, verification_next_at, client_index, client_ref, signer_iin, signer_name, signer_bin, org_name, signer_type, basis, cert_serial, cert_not_before, cert_not_after, ca_name, ocsp_status, tsp_time, sign_format, qr_url, postprocess_status, postprocess_error, postprocess_error_code, postprocess_attempts, postprocess_next_at, postprocess_started_at
 `
 
 type UpdateSessionDocumentStatusParams struct {
@@ -1531,6 +1981,12 @@ func (q *Queries) UpdateSessionDocumentStatus(ctx context.Context, arg UpdateSes
 		&i.TspTime,
 		&i.SignFormat,
 		&i.QrUrl,
+		&i.PostprocessStatus,
+		&i.PostprocessError,
+		&i.PostprocessErrorCode,
+		&i.PostprocessAttempts,
+		&i.PostprocessNextAt,
+		&i.PostprocessStartedAt,
 	)
 	return i, err
 }
@@ -1539,7 +1995,7 @@ const updateSessionDocumentTargetURL = `-- name: UpdateSessionDocumentTargetURL 
 UPDATE signing_session_documents
 SET target_url = $2
 WHERE id = $1
-RETURNING id, session_id, document_name, source_url, target_url, target_s3_key, content_hash, cached_s3_key, signed_s3_key, cms_s3_key, status, last_error, upload_attempts, signed_at, uploaded_at, created_at, hash_source, source_s3_bucket, source_s3_key, source_content_type, source_size_bytes, source_meta_hash, verification_status, verification_checked_at, verification_error, verification_attempts, verification_next_at, client_index, client_ref, signer_iin, signer_name, signer_bin, org_name, signer_type, basis, cert_serial, cert_not_before, cert_not_after, ca_name, ocsp_status, tsp_time, sign_format, qr_url
+RETURNING id, session_id, document_name, source_url, target_url, target_s3_key, content_hash, cached_s3_key, signed_s3_key, cms_s3_key, status, last_error, upload_attempts, signed_at, uploaded_at, created_at, hash_source, source_s3_bucket, source_s3_key, source_content_type, source_size_bytes, source_meta_hash, verification_status, verification_checked_at, verification_error, verification_attempts, verification_next_at, client_index, client_ref, signer_iin, signer_name, signer_bin, org_name, signer_type, basis, cert_serial, cert_not_before, cert_not_after, ca_name, ocsp_status, tsp_time, sign_format, qr_url, postprocess_status, postprocess_error, postprocess_error_code, postprocess_attempts, postprocess_next_at, postprocess_started_at
 `
 
 type UpdateSessionDocumentTargetURLParams struct {
@@ -1594,6 +2050,12 @@ func (q *Queries) UpdateSessionDocumentTargetURL(ctx context.Context, arg Update
 		&i.TspTime,
 		&i.SignFormat,
 		&i.QrUrl,
+		&i.PostprocessStatus,
+		&i.PostprocessError,
+		&i.PostprocessErrorCode,
+		&i.PostprocessAttempts,
+		&i.PostprocessNextAt,
+		&i.PostprocessStartedAt,
 	)
 	return i, err
 }

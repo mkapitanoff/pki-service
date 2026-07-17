@@ -100,7 +100,7 @@ func main() {
 		verInitialDelay = 60 * time.Second
 	}
 	signCompleteHandler := handler.NewSignCompleteHandler(
-		queries, ncClient, store, extS3,
+		queries, ncClient, store,
 		cfg.Verification.Enabled, verInitialDelay,
 		cfg.App.VerifyBaseURL,
 	)
@@ -142,10 +142,15 @@ func main() {
 		Interval:  5 * time.Second,
 		BatchSize: 50,
 	}, queries, &http.Client{Timeout: 15 * time.Second})
+	postprocessWorker := worker.NewPostprocessWorker(worker.PostprocessConfig{
+		TickInterval: time.Duration(signingCfg.PostprocessTickIntervalSec) * time.Second,
+		MaxAttempts:  signingCfg.MaxPostprocessAttempts,
+	}, queries, store, extS3)
 	go docFetcher.Run(workerCtx)
 	go webhookDispatcher.Run(workerCtx)
 	go sessionCleanup.Run(workerCtx)
 	go deliveryPoller.Run(workerCtx)
+	go postprocessWorker.Run(workerCtx)
 
 	// Verification worker — внутренняя async-сверка x-amz-meta-sha256 ↔ content_hash.
 	// Source-S3 клиент: если source_* пуст в storage-конфиге, используем
@@ -245,6 +250,7 @@ func main() {
 				"webhook_dispatcher":      workerStatus(webhookDispatcher.Running()),
 				"session_cleanup":         workerStatus(sessionCleanup.Running()),
 				"webhook_delivery_poller": workerStatus(deliveryPoller.Running()),
+				"postprocess_worker":      workerStatus(postprocessWorker.Running()),
 			},
 			"storage": bucketStatus,
 		}

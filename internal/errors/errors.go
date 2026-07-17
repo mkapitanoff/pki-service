@@ -45,6 +45,8 @@ func (e *AppError) WithCause(cause error) *AppError {
 var (
 	ErrCMSInvalid        = &AppError{Code: "CMS_INVALID", Status: 422, Message: "CMS signature is invalid"}
 	ErrCertRevoked       = &AppError{Code: "CERT_REVOKED", Status: 422, Message: "Certificate is revoked"}
+	ErrCertStatusUnknown = &AppError{Code: "CERT_STATUS_UNKNOWN", Status: 422, Message: "Certificate revocation status could not be determined"}
+	ErrCertInvalidUsage  = &AppError{Code: "CERT_INVALID_USAGE", Status: 422, Message: "Certificate key usage does not permit signing"}
 	ErrDocumentNotFound  = &AppError{Code: "DOCUMENT_NOT_FOUND", Status: 404, Message: "Document not found"}
 	ErrUnauthorized      = &AppError{Code: "UNAUTHORIZED", Status: 401, Message: "Unauthorized"}
 	ErrForbidden         = &AppError{Code: "FORBIDDEN", Status: 403, Message: "Forbidden"}

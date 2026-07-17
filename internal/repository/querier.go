@@ -13,6 +13,12 @@ import (
 
 type Querier interface {
 	CancelApplication(ctx context.Context, arg CancelApplicationParams) (Application, error)
+	// CAS: воркер забирает джобу, только если она ещё не в работе/не завершена.
+	// 0 строк = уже обработано другим воркером или дублирующей доставкой сообщения.
+	// status='uploading' держится все ретраи подряд (и на этапе pdfcpu-сборки, и
+	// на этапе клиентской выгрузки) — это единое "активно обрабатывается" для
+	// /sign/status; success → 'uploaded', terminal fail → 'post_process_failed'.
+	ClaimSessionDocumentForPostprocess(ctx context.Context, id uuid.UUID) (SigningSessionDocument, error)
 	CleanupExpiredIdempotencyKeys(ctx context.Context) error
 	CountSigningSessionDocumentsForRegistry(ctx context.Context, arg CountSigningSessionDocumentsForRegistryParams) (int64, error)
 	CreateAPIKey(ctx context.Context, arg CreateAPIKeyParams) (ApiKey, error)
@@ -73,6 +79,10 @@ type Querier interface {
 	ListAPIKeysByTenant(ctx context.Context, tenantID uuid.UUID) ([]ApiKey, error)
 	ListActiveApplicationDocuments(ctx context.Context, arg ListActiveApplicationDocumentsParams) ([]ApplicationDocument, error)
 	ListApplicationDocuments(ctx context.Context, applicationID uuid.UUID) ([]ApplicationDocument, error)
+	// Поллер (тот же паттерн, что ListDocumentsForVerification): подхватывает
+	// джобы, у которых наступило время следующей попытки — страхует publish-сбой
+	// и отсутствие бэкоффа у Nack(requeue=true) в RabbitMQ-консьюмере.
+	ListDocumentsDueForPostprocess(ctx context.Context, limit int32) ([]SigningSessionDocument, error)
 	// Воркер берёт пачку документов, готовых к проверке. SKIP LOCKED — для безопасной
 	// работы нескольких инстансов воркера одновременно.
 	ListDocumentsForVerification(ctx context.Context, limit int32) ([]SigningSessionDocument, error)
@@ -90,6 +100,16 @@ type Querier interface {
 	ListUsers(ctx context.Context) ([]User, error)
 	ListWebhooksByTenant(ctx context.Context, tenantID uuid.UUID) ([]Webhook, error)
 	MarkApplicationDocumentUploaded(ctx context.Context, id uuid.UUID) (ApplicationDocument, error)
+	MarkSessionDocumentPostprocessDone(ctx context.Context, id uuid.UUID) (SigningSessionDocument, error)
+	// Терминальный провал: попытки исчерпаны. status='post_process_failed' —
+	// отдельное значение от upload_failed/fetch_failed, чтобы отличать провал на
+	// этапе фонового постпроцессинга от старых причин отказа.
+	MarkSessionDocumentPostprocessFailed(ctx context.Context, arg MarkSessionDocumentPostprocessFailedParams) (SigningSessionDocument, error)
+	MarkSessionDocumentPostprocessRetrying(ctx context.Context, arg MarkSessionDocumentPostprocessRetryingParams) error
+	// Быстрый синхронный путь: NCANode уже подтвердил CMS, CMS-архив уже залит.
+	// Документ юридически подписан, но артефакт (QR-штамп + Лист подписей) ещё
+	// не собран — это ставится в очередь постпроцессинга (postprocess_status).
+	MarkSessionDocumentSigned(ctx context.Context, arg MarkSessionDocumentSignedParams) (SigningSessionDocument, error)
 	// client-mode + sanity-check провалился: реально посчитанный SHA не совпал
 	// с клиентским hash. Документ окончательно отбракован.
 	MarkSessionDocumentTampered(ctx context.Context, arg MarkSessionDocumentTamperedParams) (SigningSessionDocument, error)
@@ -108,6 +128,10 @@ type Querier interface {
 	// атрибутов у документов не трогаем.
 	RecalcSessionVerification(ctx context.Context, id uuid.UUID) error
 	ResetSessionDocumentForRetry(ctx context.Context, arg ResetSessionDocumentForRetryParams) (SigningSessionDocument, error)
+	// Пишется сразу после успешной загрузки собранного PDF во внутренний MinIO,
+	// независимо от статуса всей джобы — позволяет ретраю пропустить повторную
+	// pdfcpu-сборку, если процесс упал уже после этого шага.
+	SetSessionDocumentSignedS3Key(ctx context.Context, arg SetSessionDocumentSignedS3KeyParams) error
 	SupersedeApplicationDocument(ctx context.Context, arg SupersedeApplicationDocumentParams) (ApplicationDocument, error)
 	UpdateAPIKeyLastUsed(ctx context.Context, id uuid.UUID) error
 	UpdateApplicationDocumentAfterFetch(ctx context.Context, arg UpdateApplicationDocumentAfterFetchParams) (ApplicationDocument, error)
@@ -123,7 +147,6 @@ type Querier interface {
 	UpdateSessionDocumentAfterFetch(ctx context.Context, arg UpdateSessionDocumentAfterFetchParams) (SigningSessionDocument, error)
 	// client-mode: hash уже записан, фетчер только кэширует PDF.
 	UpdateSessionDocumentAfterFetchKeepHash(ctx context.Context, arg UpdateSessionDocumentAfterFetchKeepHashParams) (SigningSessionDocument, error)
-	UpdateSessionDocumentAfterSign(ctx context.Context, arg UpdateSessionDocumentAfterSignParams) (SigningSessionDocument, error)
 	// Персистит ncanode.VerifyResult + реальный verify QR-URL. Non-fatal при
 	// ошибке (вызывающий код логирует и продолжает — PDF уже собран корректно).
 	UpdateSessionDocumentSignerInfo(ctx context.Context, arg UpdateSessionDocumentSignerInfoParams) (SigningSessionDocument, error)

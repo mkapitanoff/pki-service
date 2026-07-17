@@ -2,10 +2,8 @@ package handler
 
 import (
 	"context"
-	"crypto/sha256"
 	"database/sql"
 	"encoding/base64"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -18,21 +16,21 @@ import (
 
 	apperr "github.com/mkapitanoff/pki-service/internal/errors"
 	"github.com/mkapitanoff/pki-service/internal/ncanode"
-	"github.com/mkapitanoff/pki-service/internal/pdf"
-	"github.com/mkapitanoff/pki-service/internal/qr"
 	"github.com/mkapitanoff/pki-service/internal/reqctx"
 	"github.com/mkapitanoff/pki-service/internal/repository"
-	"github.com/mkapitanoff/pki-service/internal/s3client"
 	"github.com/mkapitanoff/pki-service/internal/signer"
 	"github.com/mkapitanoff/pki-service/internal/storage"
 )
 
-// SignCompleteHandler handles POST /api/v1/sign/complete.
+// SignCompleteHandler handles POST /api/v1/sign/complete. It only performs
+// the fast, synchronous part of signing (CMS verification + signer-info
+// persist); QR-stamping, sign-page regeneration and the client-S3 upload run
+// in the background — see internal/postprocess and internal/worker's
+// PostprocessWorker.
 type SignCompleteHandler struct {
 	queries                 *repository.Queries
 	nc                      ncanode.NCANodeClient
 	store                   storage.Storage
-	extS3                   s3client.ExternalS3Client
 	verificationEnabled     bool          // фиче-флаг async-сверки
 	verificationInitialWait time.Duration // задержка перед первой попыткой
 	verifyBaseURL           string        // базовый URL для QR/verify-ссылки, напр. https://pki.fin4b.kz
@@ -42,7 +40,6 @@ func NewSignCompleteHandler(
 	queries *repository.Queries,
 	nc ncanode.NCANodeClient,
 	store storage.Storage,
-	extS3 s3client.ExternalS3Client,
 	verificationEnabled bool,
 	verificationInitialWait time.Duration,
 	verifyBaseURL string,
@@ -54,7 +51,6 @@ func NewSignCompleteHandler(
 		queries:                 queries,
 		nc:                      nc,
 		store:                   store,
-		extS3:                   extS3,
 		verificationEnabled:     verificationEnabled,
 		verificationInitialWait: verificationInitialWait,
 		verifyBaseURL:           verifyBaseURL,
@@ -248,7 +244,8 @@ func (h *SignCompleteHandler) processSig(
 			doc.ID, signedHashHex, contentHashHex)
 	}
 
-	// 5. Verify CMS via NCANode.
+	// 5. Verify CMS via NCANode — юридически значимая проверка подписи,
+	// остаётся синхронной (см. план: /Users/user/.claude/plans/synthetic-launching-blanket.md).
 	vr, err := h.nc.VerifyCMS(ctx, cmsBase64, contentHashHex)
 	if err != nil {
 		switch {
@@ -256,65 +253,19 @@ func (h *SignCompleteHandler) processSig(
 			return nil, &cmsInvalidError{msg: "CMS signature is invalid"}
 		case errors.Is(err, ncanode.ErrCertRevoked):
 			return nil, &cmsInvalidError{msg: "certificate is revoked"}
+		case errors.Is(err, ncanode.ErrCertStatusUnknown):
+			return nil, &cmsInvalidError{msg: "certificate revocation status could not be determined (OCSP unavailable)"}
+		case errors.Is(err, ncanode.ErrCertInvalidUsage):
+			return nil, &cmsInvalidError{msg: "certificate key usage does not permit signing (nonRepudiation required)"}
 		default:
 			return nil, fmt.Errorf("ncanode verify: %w", err)
 		}
 	}
 
-	// 6. Получить оригинал PDF. Обычно он уже в кэше MinIO (положил фетчер).
-	// Fast-path (client-hash): фоновый кэш мог не успеть к моменту /complete —
-	// тогда докачиваем оригинал напрямую по source_url.
-	var pdfBytes []byte
-	if doc.CachedS3Key.Valid && doc.CachedS3Key.String != "" {
-		b, derr := h.store.DownloadFile(ctx, doc.CachedS3Key.String)
-		if derr != nil {
-			return nil, fmt.Errorf("download cached pdf: %w", derr)
-		}
-		pdfBytes = b
-	} else {
-		if doc.SourceUrl == "" {
-			return nil, fmt.Errorf("document has no cached_s3_key and no source_url")
-		}
-		b, _, derr := s3client.DownloadWithRetry(ctx, h.extS3, doc.SourceUrl, 3)
-		if derr != nil {
-			return nil, fmt.Errorf("on-demand download source pdf: %w", derr)
-		}
-		pdfBytes = b
-	}
-
-	// 7. Build signed PDF with QR stamp + sign page (same as service.Sign).
+	// 6. Персист signer/cert-полей + реального verify-URL. Это последнее, что
+	// нужно постпроцессингу для сборки Листа подписей — воркер читает эти
+	// колонки из БД, а не из транзиентного vr (которого у него нет).
 	qrURL := fmt.Sprintf("%s/verify/%s", h.verifyBaseURL, doc.ID)
-	signedPDF, err := h.buildSignedPDF(ctx, pdfBytes, doc, session, vr, qrURL)
-	if err != nil {
-		return nil, fmt.Errorf("build signed pdf: %w", err)
-	}
-
-	// 8. Store in our MinIO.
-	signedKey := fmt.Sprintf("signed/%s/%s.pdf", session.ID, doc.ID)
-	cmsKey := fmt.Sprintf("cms/%s.p7s", doc.ID)
-
-	if err := h.store.UploadFile(ctx, signedKey, signedPDF, "application/pdf"); err != nil {
-		return nil, fmt.Errorf("upload signed pdf: %w", err)
-	}
-	if err := h.store.UploadFile(ctx, cmsKey, cmsBytes, "application/pkcs7-signature"); err != nil {
-		log.Printf("sign_complete: upload cms doc=%s: %v (non-fatal)", doc.ID, err)
-	}
-
-	// 9. Update DB.
-	updatedDoc, err := h.queries.UpdateSessionDocumentAfterSign(ctx, repository.UpdateSessionDocumentAfterSignParams{
-		ID:          doc.ID,
-		CmsS3Key:    sql.NullString{String: cmsKey, Valid: true},
-		SignedS3Key: sql.NullString{String: signedKey, Valid: true},
-	})
-	if err != nil {
-		return nil, fmt.Errorf("update after sign: %w", err)
-	}
-
-	// 9b. Персист signer/cert-полей + реального verify-URL — раньше vr
-	// использовался только транзиентно для Листа подписей и терялся. Без
-	// этого /verify/{doc.ID} не может отрендерить страницу верификации, а QR
-	// в PDF указывал на нерабочий плейсхолдер. Non-fatal: PDF уже собран
-	// корректно независимо от того, записалось ли это в БД.
 	if _, err := h.queries.UpdateSessionDocumentSignerInfo(ctx, repository.UpdateSessionDocumentSignerInfoParams{
 		ID:            doc.ID,
 		SignerIin:     sql.NullString{String: vr.SignerIIN, Valid: vr.SignerIIN != ""},
@@ -332,12 +283,30 @@ func (h *SignCompleteHandler) processSig(
 		SignFormat:    sql.NullString{String: vr.SignFormat, Valid: vr.SignFormat != ""},
 		QrUrl:         sql.NullString{String: qrURL, Valid: true},
 	}); err != nil {
-		log.Printf("sign_complete: persist signer info doc=%s: %v (non-fatal)", doc.ID, err)
+		return nil, fmt.Errorf("persist signer info: %w", err)
 	}
 
-	// 9a. Поставить документ в очередь async-верификации (внутренний контроль
-	// целостности). Если воркер отключён — пропускаем; verification_status
-	// остаётся NULL, наружу всё равно ничего не светится.
+	// 7. CMS-архив — маленький объект, не PDF-рендер, дёшево оставить
+	// синхронным. cms_s3_key пишется вместе с флипом в 'signed' ниже, чтобы
+	// воркер постпроцессинга никогда не перезаливал и не перевызывал NCANode.
+	cmsKey := fmt.Sprintf("cms/%s.p7s", doc.ID)
+	if err := h.store.UploadFile(ctx, cmsKey, cmsBytes, "application/pkcs7-signature"); err != nil {
+		return nil, fmt.Errorf("upload cms archive: %w", err)
+	}
+
+	// 8. Документ юридически подписан прямо сейчас — фиксируем это и ставим
+	// джобу постпроцессинга (QR-штамп + Лист подписей + upload клиенту) в
+	// очередь. PostprocessWorker (тикер, internal/worker) подхватит её сам —
+	// без явной публикации, тот же паттерн, что и VerificationWorker.
+	if _, err := h.queries.MarkSessionDocumentSigned(ctx, repository.MarkSessionDocumentSignedParams{
+		ID:       doc.ID,
+		CmsS3Key: sql.NullString{String: cmsKey, Valid: true},
+	}); err != nil {
+		return nil, fmt.Errorf("mark signed: %w", err)
+	}
+
+	// 8b. Внутренняя async-сверка (verification_status) — отдельный, не
+	// связанный с постпроцессингом механизм, оставляем как есть.
 	if h.verificationEnabled {
 		nextAt := time.Now().Add(h.verificationInitialWait)
 		if err := h.queries.MarkSessionDocumentVerificationPending(ctx,
@@ -350,88 +319,14 @@ func (h *SignCompleteHandler) processSig(
 		}
 	}
 
-	// 10. Upload to client S3 and dispatch webhook asynchronously.
-	go h.uploadToClientS3(context.Background(), session, updatedDoc, signedPDF)
-
-	s3Key := ""
-	if updatedDoc.TargetS3Key.Valid {
-		s3Key = updatedDoc.TargetS3Key.String
-	}
+	// 9. Ответ: документ подписан, но артефакт (проштампованный PDF) ещё
+	// готовится в фоне — s3_key намеренно не отдаём, клиент обязан поллить
+	// /sign/status и ждать state=UPLOADED перед показом кнопки скачивания.
 	return &completeDocResponse{
 		DocID:  doc.ID.String(),
 		Name:   doc.DocumentName,
 		Status: "signed",
-		S3Key:  s3Key,
 	}, nil
-}
-
-// buildSignedPDF applies QR stamp + sign page to the original PDF using the same
-// mechanism as service.Sign (pdf.AddQRStamps + pdf.GenerateSignPage + pdf.ReplaceLastPage).
-func (h *SignCompleteHandler) buildSignedPDF(
-	ctx context.Context,
-	pdfBytes []byte,
-	doc repository.SigningSessionDocument,
-	session repository.SigningSession,
-	vr *ncanode.VerifyResult,
-	qrURL string,
-) ([]byte, error) {
-	// Compute document hash for the sign page display.
-	sum := sha256.Sum256(pdfBytes)
-	docHashHex := hex.EncodeToString(sum[:])
-
-	qrPNG, err := qr.GenerateQR(qrURL, qr.DefaultSize)
-	if err != nil {
-		return nil, fmt.Errorf("generate qr: %w", err)
-	}
-
-	sigInfo := pdf.SignatureInfo{
-		SignerName:    vr.SignerName,
-		OrgName:       vr.OrgName,
-		BIN:           vr.SignerBIN,
-		IIN:           vr.SignerIIN,
-		Role:          session.SignerRole,
-		SignerType:    vr.SignerType,
-		Basis:         vr.Basis,
-		CertSerial:    vr.CertSerial,
-		CertNotBefore: vr.CertNotBefore,
-		CertNotAfter:  vr.CertNotAfter,
-		CAName:        vr.CAName,
-		SignFormat:    vr.SignFormat,
-		SHA256Hash:    docHashHex,
-		Status:        "Подпись действительна",
-		SignedAt:      vr.TSPTime,
-		QRImagePNG:    qrPNG,
-	}
-
-	stamped, err := pdf.AddQRStamps(pdfBytes, []pdf.QRStamp{{
-		SignerName: vr.SignerName,
-		Role:       session.SignerRole,
-		QRImagePNG: qrPNG,
-	}})
-	if err != nil {
-		return nil, fmt.Errorf("add qr stamps: %w", err)
-	}
-
-	signPage, err := pdf.GenerateSignPage([]pdf.SignatureInfo{sigInfo})
-	if err != nil {
-		return nil, fmt.Errorf("generate sign page: %w", err)
-	}
-
-	finalPDF, err := pdf.ReplaceLastPage(stamped, signPage)
-	if err != nil {
-		return nil, fmt.Errorf("replace last page: %w", err)
-	}
-	return finalPDF, nil
-}
-
-// uploadToClientS3 delegates to the shared package-level helper.
-func (h *SignCompleteHandler) uploadToClientS3(
-	ctx context.Context,
-	session repository.SigningSession,
-	doc repository.SigningSessionDocument,
-	signedPDF []byte,
-) {
-	uploadSessionDocToClientS3(ctx, h.queries, h.extS3, h.store, session, doc, signedPDF)
 }
 
 // --- sentinel error types for typed HTTP responses ---
