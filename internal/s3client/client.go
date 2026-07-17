@@ -9,12 +9,21 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 	"time"
 )
 
-// ErrPresignedURLExpired is returned when the server rejects with HTTP 403,
-// indicating the pre-signed URL has expired.
+// ErrPresignedURLExpired is returned when the server rejects with HTTP 403
+// specifically because the pre-signed URL has expired (S3 «Request has expired»).
+// Recovery: re-issue a fresh URL via PATCH /sign/refresh-urls.
 var ErrPresignedURLExpired = fmt.Errorf("s3client: pre-signed URL expired (HTTP 403)")
+
+// ErrPresignedURLForbidden is returned for a NON-expiry HTTP 403 — most often
+// SignatureDoesNotMatch (запрос не совпал с подписью URL: не тот заголовок/
+// Content-Type/лишний x-amz-*). Перевыпуск URL не поможет — это ошибка контракта
+// на стороне выдавшего presigned URL. Отличать от ErrPresignedURLExpired важно,
+// чтобы не гонять бесполезный refresh-urls и не писать в лог «URL expired».
+var ErrPresignedURLForbidden = fmt.Errorf("s3client: pre-signed URL rejected (HTTP 403, not expired)")
 
 // S3Metadata holds PKI-specific metadata attached to uploaded objects.
 type S3Metadata struct {
@@ -119,13 +128,46 @@ func (c *HTTPExternalS3Client) UploadToPresignedURL(ctx context.Context, rawURL 
 	log.Printf("s3client: PUT %s (%d bytes) → %d", safeURL, len(data), resp.StatusCode)
 
 	if resp.StatusCode == http.StatusForbidden {
-		return ErrPresignedURLExpired
+		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		return classify403(raw)
 	}
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
 		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 		return fmt.Errorf("s3client: PUT %s returned %d: %s", safeURL, resp.StatusCode, string(raw))
 	}
 	return nil
+}
+
+// classify403 различает истечение presigned URL от прочих 403 (SignatureDoesNotMatch
+// и т.п.) по телу ответа S3. Истечение S3 всегда сообщает «Request has expired»
+// (Code=AccessDenied) либо Code=ExpiredToken; всё остальное — ErrPresignedURLForbidden
+// с кодом S3 в тексте для диагностики.
+func classify403(body []byte) error {
+	lc := strings.ToLower(string(body))
+	code := extractS3Code(body)
+	if strings.Contains(lc, "expired") || code == "ExpiredToken" {
+		return ErrPresignedURLExpired
+	}
+	if code != "" {
+		return fmt.Errorf("%w (S3 code: %s)", ErrPresignedURLForbidden, code)
+	}
+	return ErrPresignedURLForbidden
+}
+
+// extractS3Code вытаскивает <Code>...</Code> из XML-ошибки S3.
+func extractS3Code(body []byte) string {
+	s := string(body)
+	const open, closeTag = "<Code>", "</Code>"
+	i := strings.Index(s, open)
+	if i < 0 {
+		return ""
+	}
+	rest := s[i+len(open):]
+	j := strings.Index(rest, closeTag)
+	if j < 0 {
+		return ""
+	}
+	return rest[:j]
 }
 
 // redactQuery removes query parameters from the URL for safe logging.

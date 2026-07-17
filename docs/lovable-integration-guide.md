@@ -107,7 +107,7 @@ Chandra. Перед вставкой замените `<TENANT_API_KEY>` на р
 
 Per-doc `state`: `PENDING → FETCHING → READY → SIGNING → SIGNED → UPLOADING → UPLOADED` |
 `FAILED`. Дополнительные поля: `verify_url`, `s3_key`, `error_code`
-(`FETCH_FAILED`/`UPLOAD_FAILED`/`SIGNING_FAILED`/`POST_PROCESSING_FAILED`/`TARGET_URL_EXPIRED`).
+(`FETCH_FAILED`/`UPLOAD_FAILED`/`SIGNING_FAILED`/`POST_PROCESSING_FAILED`/`TARGET_URL_EXPIRED`/`TARGET_URL_REJECTED`).
 
 **Гейтинг UI — два независимых условия, не путать:**
 - **Кнопка/ссылка «Проверить подпись» (verify_url) + QR** — показывать сразу, как только у
@@ -130,9 +130,25 @@ Per-doc `state`: `PENDING → FETCHING → READY → SIGNING → SIGNED → UPLO
 - `error_code: TARGET_URL_EXPIRED` — presigned URL истёк раньше, чем закончилась фоновая
   обработка. Восстановимо: сгенерируй новый `target_url` и вызови `PATCH /sign/refresh-urls`,
   выгрузка повторится автоматически без пересборки PDF.
+- `error_code: TARGET_URL_REJECTED` — presigned `target_url` отклонён S3 клиента с 403, но НЕ по
+  истечению (обычно `SignatureDoesNotMatch`): запрос Chandra не совпал с подписью URL. Перевыпуск
+  через `refresh-urls` НЕ поможет — проблема в контракте самого presigned PUT. Частая причина:
+  target-presign подписан с обязательным `x-amz-meta-sha256`, которого Chandra при заливке не шлёт
+  (для target подписывай presign БЕЗ метаданных, только `Content-Type`). Покажи ошибку, ретрай не
+  предлагай — нужно исправить генерацию `target_url`.
 - `error_code: POST_PROCESSING_FAILED` — терминально, фоновая сборка/выгрузка исчерпала попытки
   на стороне Chandra. Покажи понятную ошибку, кнопку ретрая с фронта не делай (нужно
   переподписание документа заново).
+
+**Ошибки верификации подписи — из `POST /api/v1/sign/complete`** (per-doc `status != "signed"` +
+`error`, либо HTTP 422 `{"error":{"code":"…"}}`). Соответствуют Правилам НУЦ РК (приказ №1187):
+- `CMS_INVALID` — подпись криптографически невалидна (хэш не совпал / битый CMS). Терминально.
+- `CERT_REVOKED` — сертификат отозван. Терминально.
+- `CERT_INVALID_USAGE` — выбран сертификат аутентификации (нет `nonRepudiation`/«Неотрекаемость»)
+  вместо сертификата подписи. Сообщение: «Выберите сертификат для подписи (ключ RSA…SIGN или
+  GOST…SIGN)». Дай повторить с правильным ключом.
+- `CERT_STATUS_UNKNOWN` — не удалось подтвердить статус отзыва (OCSP НУЦ РК временно недоступен).
+  ВРЕМЕННО. Сообщение: «Сервис НУЦ РК недоступен, попробуйте через минуту» + кнопка «Повторить».
 
 ### 7. Модалка/UI подписания
 

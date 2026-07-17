@@ -28,8 +28,10 @@ func DownloadWithRetry(
 		if err == nil {
 			return data, ct, nil
 		}
-		if errors.Is(err, ErrPresignedURLExpired) {
-			return nil, "", ErrPresignedURLExpired
+		// Один и тот же presigned URL повторять бессмысленно, если он истёк
+		// или отклонён по подписи — возвращаем ошибку сразу.
+		if errors.Is(err, ErrPresignedURLExpired) || errors.Is(err, ErrPresignedURLForbidden) {
+			return nil, "", err
 		}
 		lastErr = err
 		if attempt < maxAttempts {
@@ -68,8 +70,9 @@ func UploadWithRetry(
 		if err == nil {
 			return nil
 		}
-		if errors.Is(err, ErrPresignedURLExpired) {
-			return ErrPresignedURLExpired
+		// Истёкший или отклонённый по подписи URL повторять бессмысленно.
+		if errors.Is(err, ErrPresignedURLExpired) || errors.Is(err, ErrPresignedURLForbidden) {
+			return err
 		}
 		lastErr = err
 		if attempt < maxAttempts {
