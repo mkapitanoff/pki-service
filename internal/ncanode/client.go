@@ -112,25 +112,24 @@ type ncaIssuer struct {
 	CommonName string `json:"commonName"`
 }
 
-type ncaOCSP struct {
-	Status      string    `json:"status"`
-	RevokedAt   time.Time `json:"revokedAt"`
-	CheckedTime time.Time `json:"genTime"`
-}
-
 type ncaTSP struct {
 	GenTime time.Time `json:"genTime"`
 }
 
+// ncaCertificate — форма ответа NCANode 3.4.1 (проверено на прод-трафике):
+// отзыв сертификата отражён массивом "revocations" (события от
+// сконфигурированных CRL/OCSP-источников, см. NCANODE_OCSP_URL/
+// NCANODE_CRL_URL), а не отдельным объектом "ocsp" — такого поля в реальном
+// ответе нет.
 type ncaCertificate struct {
-	Valid        bool       `json:"valid"`
-	Subject      ncaSubject `json:"subject"`
-	Issuer       ncaIssuer  `json:"issuer"`
-	SerialNumber string     `json:"serialNumber"`
-	NotBefore    time.Time  `json:"notBefore"`
-	NotAfter     time.Time  `json:"notAfter"`
-	KeyUsage     string     `json:"keyUsage"`
-	OCSP         *ncaOCSP   `json:"ocsp"`
+	Valid        bool              `json:"valid"`
+	Subject      ncaSubject        `json:"subject"`
+	Issuer       ncaIssuer         `json:"issuer"`
+	SerialNumber string            `json:"serialNumber"`
+	NotBefore    time.Time         `json:"notBefore"`
+	NotAfter     time.Time         `json:"notAfter"`
+	KeyUsage     string            `json:"keyUsage"`
+	Revocations  []json.RawMessage `json:"revocations"`
 }
 
 type ncaSigner struct {
@@ -235,20 +234,16 @@ func (c *HTTPClient) VerifyCMS(ctx context.Context, cmsBase64 string, docSHA256 
 		return nil, ErrCertInvalidUsage
 	}
 
-	// п.6.2: отозванность должна быть ПОДТВЕРЖДЕНА. revoked → отклоняем;
-	// unknown (OCSP недоступен / статус не определён) → fail-closed.
-	ocspStatus := normalizeOCSP(cert.OCSP)
-	switch ocspStatus {
-	case OCSPStatusRevoked:
+	// п.6.2: отозванность должна быть ПОДТВЕРЖДЕНА. NCANode 3.4.1 сам выполняет
+	// CRL/OCSP-проверку (сконфигурирована через NCANODE_OCSP_URL/CRL_URL) и
+	// отражает результат в "revocations": пустой список при valid=true —
+	// сертификат подтверждённо не отозван; непустой — отозван.
+	ocspStatus := OCSPStatusGood
+	if len(cert.Revocations) > 0 {
 		return nil, ErrCertRevoked
-	case OCSPStatusUnknown:
-		return nil, ErrCertStatusUnknown
 	}
 
 	ocspCheckedAt := time.Now().UTC()
-	if cert.OCSP != nil && !cert.OCSP.CheckedTime.IsZero() {
-		ocspCheckedAt = cert.OCSP.CheckedTime
-	}
 
 	var tspTime time.Time
 	if signer.TSP != nil {
@@ -289,20 +284,6 @@ func (c *HTTPClient) GetTSP(ctx context.Context, dataSHA256 string) (time.Time, 
 		return time.Time{}, fmt.Errorf("ncanode: tsp response missing genTime")
 	}
 	return resp.TSP.GenTime, nil
-}
-
-func normalizeOCSP(o *ncaOCSP) string {
-	if o == nil {
-		return OCSPStatusUnknown
-	}
-	switch strings.ToLower(strings.TrimSpace(o.Status)) {
-	case "good", "active":
-		return OCSPStatusGood
-	case "revoked":
-		return OCSPStatusRevoked
-	default:
-		return OCSPStatusUnknown
-	}
 }
 
 // keyUsagePermitsSigning проверяет, что KeyUsage сертификата допускает ЭЦП.

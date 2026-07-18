@@ -45,7 +45,6 @@ func TestVerifyCMS_Success(t *testing.T) {
 						Organization: "ТОО МеталлОптТорг KZ",
 					},
 					Issuer: ncaIssuer{CommonName: "ҰЛТТЫҚ КУӘЛАНДЫРУШЫ ОРТАЛЫҚ"},
-					OCSP:   &ncaOCSP{Status: "GOOD", CheckedTime: time.Date(2026, 5, 15, 10, 0, 0, 0, time.UTC)},
 				}},
 				TSP: &ncaTSP{GenTime: time.Date(2026, 5, 15, 10, 0, 1, 0, time.UTC)},
 			}},
@@ -68,6 +67,8 @@ func TestVerifyCMS_Success(t *testing.T) {
 	require.Equal(t, time.Date(2026, 5, 15, 10, 0, 1, 0, time.UTC), res.TSPTime)
 }
 
+// "revocations" непустой (реальный формат NCANode 3.4.1: события отзыва от
+// сконфигурированных CRL/OCSP-источников) → отклоняем (п.6.2).
 func TestVerifyCMS_RevokedReturnsError(t *testing.T) {
 	c, srv := newTestClient(func(w http.ResponseWriter, r *http.Request) {
 		resp := cmsVerifyResponse{
@@ -78,7 +79,7 @@ func TestVerifyCMS_RevokedReturnsError(t *testing.T) {
 					SerialNumber: "ABC",
 					Subject:      ncaSubject{CommonName: "X", IIN: "000000000000"},
 					Issuer:       ncaIssuer{CommonName: "CA"},
-					OCSP:         &ncaOCSP{Status: "REVOKED"},
+					Revocations:  []json.RawMessage{json.RawMessage(`{"reason":"revoked"}`)},
 				}},
 			}},
 		}
@@ -183,7 +184,6 @@ func TestVerifyCMS_AuthCertRejected(t *testing.T) {
 				Certificates: []ncaCertificate{{
 					Valid:    true,
 					KeyUsage: "AUTH",
-					OCSP:     &ncaOCSP{Status: "GOOD"},
 					Subject:  ncaSubject{CommonName: "X", IIN: "000000000000"},
 				}},
 			}},
@@ -206,7 +206,6 @@ func TestVerifyCMS_SignCertAccepted(t *testing.T) {
 				Certificates: []ncaCertificate{{
 					Valid:    true,
 					KeyUsage: "SIGN",
-					OCSP:     &ncaOCSP{Status: "GOOD"},
 					Subject:  ncaSubject{CommonName: "X", IIN: "000000000000"},
 				}},
 			}},
@@ -219,6 +218,7 @@ func TestVerifyCMS_SignCertAccepted(t *testing.T) {
 	res, err := c.VerifyCMS(context.Background(), "CMS", "hash")
 	require.NoError(t, err)
 	require.True(t, res.Valid)
+	require.Equal(t, OCSPStatusGood, res.OCSPStatus)
 }
 
 // keyUsage в классическом X.509-формате (на случай другой конфигурации NCANode) → принимаем.
@@ -230,7 +230,6 @@ func TestVerifyCMS_X509StyleKeyUsageAccepted(t *testing.T) {
 				Certificates: []ncaCertificate{{
 					Valid:    true,
 					KeyUsage: "digitalSignature, nonRepudiation",
-					OCSP:     &ncaOCSP{Status: "GOOD"},
 					Subject:  ncaSubject{CommonName: "X", IIN: "000000000000"},
 				}},
 			}},
@@ -253,7 +252,6 @@ func TestVerifyCMS_EmptyKeyUsageAccepted(t *testing.T) {
 			Signers: []ncaSigner{{
 				Certificates: []ncaCertificate{{
 					Valid:   true,
-					OCSP:    &ncaOCSP{Status: "GOOD"},
 					Subject: ncaSubject{CommonName: "X", IIN: "000000000000"},
 				}},
 			}},
@@ -268,17 +266,18 @@ func TestVerifyCMS_EmptyKeyUsageAccepted(t *testing.T) {
 	require.True(t, res.Valid)
 }
 
-// OCSP status=unknown → fail-closed (п.6.2).
-func TestVerifyCMS_OCSPUnknownRejected(t *testing.T) {
+// "revocations" отсутствует/пуст (нормальный случай — реальный формат
+// NCANode 3.4.1, проверено на прод-трафике) → не блокируем.
+func TestVerifyCMS_EmptyRevocationsAccepted(t *testing.T) {
 	c, srv := newTestClient(func(w http.ResponseWriter, r *http.Request) {
 		resp := cmsVerifyResponse{
 			Valid: true,
 			Signers: []ncaSigner{{
 				Certificates: []ncaCertificate{{
-					Valid:    true,
-					KeyUsage: "digitalSignature, nonRepudiation",
-					OCSP:     &ncaOCSP{Status: "UNKNOWN"},
-					Subject:  ncaSubject{CommonName: "X", IIN: "000000000000"},
+					Valid:       true,
+					KeyUsage:    "SIGN",
+					Subject:     ncaSubject{CommonName: "X", IIN: "000000000000"},
+					Revocations: []json.RawMessage{},
 				}},
 			}},
 		}
@@ -287,30 +286,10 @@ func TestVerifyCMS_OCSPUnknownRejected(t *testing.T) {
 	})
 	defer srv.Close()
 
-	_, err := c.VerifyCMS(context.Background(), "CMS", "hash")
-	require.ErrorIs(t, err, ErrCertStatusUnknown)
-}
-
-// OCSP отсутствует (nil) → статус не определён → fail-closed (п.6.2).
-func TestVerifyCMS_OCSPMissingRejected(t *testing.T) {
-	c, srv := newTestClient(func(w http.ResponseWriter, r *http.Request) {
-		resp := cmsVerifyResponse{
-			Valid: true,
-			Signers: []ncaSigner{{
-				Certificates: []ncaCertificate{{
-					Valid:    true,
-					KeyUsage: "digitalSignature, nonRepudiation",
-					Subject:  ncaSubject{CommonName: "X", IIN: "000000000000"},
-				}},
-			}},
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(resp)
-	})
-	defer srv.Close()
-
-	_, err := c.VerifyCMS(context.Background(), "CMS", "hash")
-	require.ErrorIs(t, err, ErrCertStatusUnknown)
+	res, err := c.VerifyCMS(context.Background(), "CMS", "hash")
+	require.NoError(t, err)
+	require.True(t, res.Valid)
+	require.Equal(t, OCSPStatusGood, res.OCSPStatus)
 }
 
 // guard: sentinel errors are distinct
