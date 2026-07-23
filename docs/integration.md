@@ -148,10 +148,24 @@ JSON `{ "error": { "code", "message", "request_id", "details"? } }`.
 `DUPLICATE_DOCUMENT_NAME` / `IDEMPOTENCY_KEY_REUSED` / `SESSION_CLOSED` 409 · `SESSION_EXPIRED` 410 ·
 `PAYLOAD_TOO_LARGE` 413 · `INVALID_CMS_BASE64` / `INVALID_CMS_STRUCTURE` / `HASH_MISMATCH` /
 `CERT_REVOKED` / `CERT_NOT_TRUSTED` / `CMS_INVALID` 422 · `RATE_LIMITED` 429 · `INTERNAL` 500 ·
-`FETCH_FAILED` 502. Асинхронный постпроцессинг (см. §3.1, отдаётся только через `/sign/status`,
-не через HTTP-код): `POST_PROCESSING_FAILED` (state=FAILED — исчерпаны попытки фоновой сборки/
-выгрузки), `TARGET_URL_EXPIRED` (state=FAILED — presigned URL истёк, восстановимо через
-`/refresh-urls`).
+`FETCH_FAILED` 502.
+
+Дополнительные `422`-коды от проверки сертификата (Правила НУЦ РК, приказ №1187):
+- `CERT_INVALID_USAGE` — выбран сертификат аутентификации вместо сертификата подписи (нет
+  KeyUsage=SIGN/nonRepudiation). Терминально для этой попытки — пользователь должен выбрать
+  другой сертификат в NCALayer.
+- `CERT_STATUS_UNKNOWN` — OCSP НУЦ РК временно недоступен, статус отзыва не подтверждён.
+  Временно, повторить через ~минуту.
+
+Асинхронный постпроцессинг (см. §3.1, отдаётся только через `/sign/status`, не через HTTP-код):
+- `POST_PROCESSING_FAILED` (state=FAILED) — исчерпаны попытки фоновой сборки/выгрузки. Терминально.
+- `TARGET_URL_EXPIRED` (state=FAILED) — presigned URL истёк до завершения выгрузки. Восстановимо:
+  прислать свежий `target_url` через `PATCH /sign/refresh-urls`.
+- `TARGET_URL_REJECTED` (state=FAILED) — presigned `target_url` отклонён S3 клиента (обычно 403
+  `SignatureDoesNotMatch`, НЕ истечение) — контракт presign не совпадает с реальным PUT-запросом
+  Chandra. Частая причина: presign подписан с обязательным `x-amz-meta-sha256`, которого Chandra
+  не шлёт (подписывайте target-presign БЕЗ метаданных, только `Content-Type`).
+  `/refresh-urls` НЕ поможет — нужно исправить генерацию presigned PUT на своей стороне.
 
 `text/html` в ответе = апстрим (ingress), не контракт — трактовать как временную недоступность.
 

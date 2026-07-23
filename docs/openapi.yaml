@@ -558,7 +558,11 @@ paths:
           description: |
             Бизнес-ошибка CMS. Возможные коды:
             `INVALID_CMS_BASE64`, `INVALID_CMS_STRUCTURE`, `HASH_MISMATCH`,
-            `CERT_REVOKED`, `CERT_NOT_TRUSTED`, `CMS_INVALID`.
+            `CERT_REVOKED` (сертификат отозван), `CERT_NOT_TRUSTED`, `CMS_INVALID`,
+            `CERT_INVALID_USAGE` (выбран сертификат аутентификации вместо сертификата
+            подписи — нет KeyUsage=SIGN/nonRepudiation), `CERT_STATUS_UNKNOWN`
+            (не удалось подтвердить статус отзыва — OCSP НУЦ РК временно недоступен,
+            повторимо).
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
@@ -1180,8 +1184,18 @@ components:
                   Сессии: SESSION_NOT_FOUND, SESSION_EXPIRED, SESSION_CLOSED.
                   CMS: INVALID_CMS_BASE64, INVALID_CMS_STRUCTURE,
                        HASH_MISMATCH, CMS_INVALID, CERT_REVOKED,
-                       CERT_NOT_TRUSTED.
+                       CERT_NOT_TRUSTED, CERT_INVALID_USAGE (сертификат
+                       аутентификации вместо сертификата подписи),
+                       CERT_STATUS_UNKNOWN (OCSP НУЦ РК временно недоступен,
+                       повторимо).
                   Fetch: FETCH_FAILED.
+                  Асинхронный постпроцессинг (только через GET /sign/status,
+                  см. StatusDocument.error_code): POST_PROCESSING_FAILED,
+                  TARGET_URL_EXPIRED (восстановимо через
+                  PATCH /sign/refresh-urls), TARGET_URL_REJECTED (presigned
+                  target_url не совпадает с реальным PUT-запросом — обычно
+                  подписан с лишним обязательным заголовком; refresh-urls не
+                  поможет, чинить генерацию presign на стороне клиента).
             message: { type: string, example: 'CMS messageDigest does not match document hash' }
             request_id:
               type: string
@@ -1379,12 +1393,18 @@ components:
             скачивания включайте только при UPLOADED, не раньше.
         error_code:
           type: string
-          enum: [FETCH_FAILED, UPLOAD_FAILED, SIGNING_FAILED, POST_PROCESSING_FAILED, TARGET_URL_EXPIRED]
+          enum: [FETCH_FAILED, UPLOAD_FAILED, SIGNING_FAILED, POST_PROCESSING_FAILED, TARGET_URL_EXPIRED, TARGET_URL_REJECTED]
           description: |
             Машинно-читаемый код ошибки документа (при state=FAILED).
             POST_PROCESSING_FAILED — фоновая сборка PDF/выгрузка исчерпала
             попытки. TARGET_URL_EXPIRED — presigned URL клиента истёк;
             восстановимо через PATCH /sign/refresh-urls с новым URL.
+            TARGET_URL_REJECTED — presigned target_url отклонён S3 клиента
+            (обычно 403 SignatureDoesNotMatch, НЕ истечение) — контракт
+            presign не совпадает с реальным PUT-запросом Chandra (частая
+            причина: presign подписан с обязательным x-amz-meta-sha256,
+            которого Chandra не шлёт). refresh-urls НЕ поможет — нужно
+            исправить генерацию presigned PUT на стороне клиента.
         s3_key:
           type: string
           description: 'Валиден только при state=UPLOADED — до этого пуст.'
@@ -1577,10 +1597,10 @@ components:
         signer_type: { type: string, enum: [individual, legal_entity_rep] }
         basis: { type: string, nullable: true }
         ca_name: { type: string }
-        cert_serial_short: { type: string, example: 2F:5...:CD }
+        cert_serial_short: { type: string, example: "2F:5...:CD" }
         cert_not_before: { type: string, format: date }
         cert_not_after: { type: string, format: date }
         sign_format: { type: string, example: CAdES (CMS, PKCS#7) }
         sha256_short: { type: string, example: 125939f4...71ece070 }
         signed_at: { type: string, format: date-time }
-        qr_data_uri: { type: string, description: data:image/png;base64,... }
+        qr_data_uri: { type: string, description: "data:image/png;base64,..." }
