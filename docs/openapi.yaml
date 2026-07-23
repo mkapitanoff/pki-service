@@ -16,17 +16,15 @@ info:
 
     ## Контуры
     - test: `http://localhost:8080`
-    - prod: `https://pki-service.darch.pro`
+    - prod: `https://pki.fin4b.kz`
 
     ## Примечания
     Некоторые request/response поля задокументированы на основе кода
     хендлеров; для нетривиальных потоков (sign/initiate, applications)
     точный JSON-контракт смотри в `internal/handler/*.go`.
-  contact:
-    email: admin@darch.pro
 
 servers:
-  - url: https://pki-service.darch.pro
+  - url: https://pki.fin4b.kz
     description: Production
 
 tags:
