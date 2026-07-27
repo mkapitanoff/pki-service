@@ -40,3 +40,15 @@ VALUES ($1, $2, $3, $4) RETURNING *;
 
 -- name: GetDocumentCallbackURL :one
 SELECT callback_url FROM documents WHERE id = $1;
+
+-- name: RelinkDocumentSource :one
+-- Обновляет s3_key_current на свежескачанный контент нового раунда подписания
+-- заявки — current_version/status/hash не трогаем, их выставит сам Sign() при
+-- обработке подписи. Используется при переиспользовании documents.id между
+-- раундами applications-флоу (см. FindLatestLinkedDocumentID в applications.sql) —
+-- без этого Sign() не видит подписи предыдущих раундов (новый documents.id
+-- на каждый раунд означал пустую историю подписей).
+UPDATE documents
+SET s3_key_current = $2, updated_at = now()
+WHERE id = $1
+RETURNING *;

@@ -3,6 +3,7 @@ package worker
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"log"
 	"time"
@@ -124,10 +125,15 @@ func (f *DocumentFetcher) fetchOne(ctx context.Context, doc repository.Applicati
 		return
 	}
 
-	// Create document record in our DB.
-	docID, err := f.createDocument(ctx, app.TenantID, doc, s3Key)
+	// Reuse the documents.id from a previous round of the same application
+	// document (matched by name), if one exists — otherwise Sign()'s signature
+	// history lookup (by document_id) always comes back empty for round 2+,
+	// so it can never accumulate QR stamps / "Лист подписей" entries across
+	// rounds (each round would silently start over as if it were the first
+	// signer). See internal/service/sign.go's `existing` lookup.
+	docID, err := f.linkDocument(ctx, app.TenantID, doc, s3Key)
 	if err != nil {
-		f.markFetchError(ctx, doc, fmt.Errorf("create document: %w", err))
+		f.markFetchError(ctx, doc, fmt.Errorf("link document: %w", err))
 		return
 	}
 
@@ -178,6 +184,31 @@ func (f *DocumentFetcher) queryApplicationByID(ctx context.Context, appID uuid.U
 		&a.CallbackUrl, &a.CallbackSecret, &a.CancelledAt, &a.CancelReason, &a.CreatedAt, &a.UpdatedAt,
 	)
 	return a, err
+}
+
+// linkDocument returns the documents.id to attach to this application_documents
+// row: the previous round's document_id for the same (application_id,
+// document_name) if one was already linked, so Sign()'s cumulative signature
+// history keeps working across rounds; otherwise creates a fresh documents row
+// (first round for this document name).
+func (f *DocumentFetcher) linkDocument(ctx context.Context, tenantID uuid.UUID, doc repository.ApplicationDocument, s3Key string) (uuid.UUID, error) {
+	prev, err := f.queries.FindLatestLinkedDocumentID(ctx, repository.FindLatestLinkedDocumentIDParams{
+		ApplicationID: doc.ApplicationID,
+		DocumentName:  doc.DocumentName,
+	})
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return uuid.UUID{}, fmt.Errorf("find previous document_id: %w", err)
+	}
+	if err == nil && prev.Valid {
+		if _, err := f.queries.RelinkDocumentSource(ctx, repository.RelinkDocumentSourceParams{
+			ID:           prev.UUID,
+			S3KeyCurrent: s3Key,
+		}); err != nil {
+			return uuid.UUID{}, fmt.Errorf("relink document source: %w", err)
+		}
+		return prev.UUID, nil
+	}
+	return f.createDocument(ctx, tenantID, doc, s3Key)
 }
 
 func (f *DocumentFetcher) createDocument(ctx context.Context, tenantID uuid.UUID, doc repository.ApplicationDocument, s3Key string) (uuid.UUID, error) {

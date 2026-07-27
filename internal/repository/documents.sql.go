@@ -204,6 +204,45 @@ func (q *Queries) GetDocumentCallbackURL(ctx context.Context, id uuid.UUID) (sql
 	return callback_url, err
 }
 
+const relinkDocumentSource = `-- name: RelinkDocumentSource :one
+UPDATE documents
+SET s3_key_current = $2, updated_at = now()
+WHERE id = $1
+RETURNING id, tenant_id, title, s3_key_original, s3_key_current, current_version, status, metadata, created_at, updated_at, callback_url, sha256_hash, sha256_hash_current
+`
+
+type RelinkDocumentSourceParams struct {
+	ID           uuid.UUID `json:"id"`
+	S3KeyCurrent string    `json:"s3_key_current"`
+}
+
+// Обновляет s3_key_current на свежескачанный контент нового раунда подписания
+// заявки — current_version/status/hash не трогаем, их выставит сам Sign() при
+// обработке подписи. Используется при переиспользовании documents.id между
+// раундами applications-флоу (см. FindLatestLinkedDocumentID в applications.sql) —
+// без этого Sign() не видит подписи предыдущих раундов (новый documents.id
+// на каждый раунд означал пустую историю подписей).
+func (q *Queries) RelinkDocumentSource(ctx context.Context, arg RelinkDocumentSourceParams) (Document, error) {
+	row := q.db.QueryRowContext(ctx, relinkDocumentSource, arg.ID, arg.S3KeyCurrent)
+	var i Document
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.Title,
+		&i.S3KeyOriginal,
+		&i.S3KeyCurrent,
+		&i.CurrentVersion,
+		&i.Status,
+		&i.Metadata,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.CallbackUrl,
+		&i.Sha256Hash,
+		&i.Sha256HashCurrent,
+	)
+	return i, err
+}
+
 const updateDocumentStatus = `-- name: UpdateDocumentStatus :one
 UPDATE documents
 SET status = $3, updated_at = now()

@@ -92,6 +92,18 @@ SELECT * FROM application_documents
 WHERE application_id = $1 AND document_name = $2 AND status != 'superseded'
 ORDER BY version;
 
+-- name: FindLatestLinkedDocumentID :one
+-- Последняя (по version) запись того же документа заявки с уже привязанным
+-- document_id — НЕ фильтруем по status: предыдущий раунд к этому моменту уже
+-- superseded (HandleSubmit помечает его так при создании новой версии), но
+-- documents.id из него нужно переиспользовать, чтобы Sign() увидел историю
+-- подписей (см. баг: каждый раунд иначе получал новый documents.id и терял
+-- накопленные подписи/QR-штампы предыдущих раундов).
+SELECT document_id FROM application_documents
+WHERE application_id = $1 AND document_name = $2 AND document_id IS NOT NULL
+ORDER BY version DESC
+LIMIT 1;
+
 -- name: GetPendingFetchDocuments :many
 SELECT * FROM application_documents
 WHERE status = 'pending'

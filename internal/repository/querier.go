@@ -45,6 +45,13 @@ type Querier interface {
 	DeleteAuthToken(ctx context.Context, tokenHash string) error
 	DeleteExpiredTokens(ctx context.Context) error
 	DeleteUser(ctx context.Context, id uuid.UUID) error
+	// Последняя (по version) запись того же документа заявки с уже привязанным
+	// document_id — НЕ фильтруем по status: предыдущий раунд к этому моменту уже
+	// superseded (HandleSubmit помечает его так при создании новой версии), но
+	// documents.id из него нужно переиспользовать, чтобы Sign() увидел историю
+	// подписей (см. баг: каждый раунд иначе получал новый documents.id и терял
+	// накопленные подписи/QR-штампы предыдущих раундов).
+	FindLatestLinkedDocumentID(ctx context.Context, arg FindLatestLinkedDocumentIDParams) (uuid.NullUUID, error)
 	FindPreviousVersions(ctx context.Context, arg FindPreviousVersionsParams) ([]ApplicationDocument, error)
 	GetAPIKeyByHash(ctx context.Context, keyHash string) (ApiKey, error)
 	GetApplicationByExternalID(ctx context.Context, arg GetApplicationByExternalIDParams) (Application, error)
@@ -127,6 +134,13 @@ type Querier interface {
 	// Приоритет: mismatch > unavailable > pending > verified. Сессии без verification-
 	// атрибутов у документов не трогаем.
 	RecalcSessionVerification(ctx context.Context, id uuid.UUID) error
+	// Обновляет s3_key_current на свежескачанный контент нового раунда подписания
+	// заявки — current_version/status/hash не трогаем, их выставит сам Sign() при
+	// обработке подписи. Используется при переиспользовании documents.id между
+	// раундами applications-флоу (см. FindLatestLinkedDocumentID в applications.sql) —
+	// без этого Sign() не видит подписи предыдущих раундов (новый documents.id
+	// на каждый раунд означал пустую историю подписей).
+	RelinkDocumentSource(ctx context.Context, arg RelinkDocumentSourceParams) (Document, error)
 	ResetSessionDocumentForRetry(ctx context.Context, arg ResetSessionDocumentForRetryParams) (SigningSessionDocument, error)
 	// Пишется сразу после успешной загрузки собранного PDF во внутренний MinIO,
 	// независимо от статуса всей джобы — позволяет ретраю пропустить повторную

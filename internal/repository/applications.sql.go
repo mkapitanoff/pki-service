@@ -180,6 +180,31 @@ func (q *Queries) CreateApplicationWebhook(ctx context.Context, arg CreateApplic
 	return i, err
 }
 
+const findLatestLinkedDocumentID = `-- name: FindLatestLinkedDocumentID :one
+SELECT document_id FROM application_documents
+WHERE application_id = $1 AND document_name = $2 AND document_id IS NOT NULL
+ORDER BY version DESC
+LIMIT 1
+`
+
+type FindLatestLinkedDocumentIDParams struct {
+	ApplicationID uuid.UUID `json:"application_id"`
+	DocumentName  string    `json:"document_name"`
+}
+
+// Последняя (по version) запись того же документа заявки с уже привязанным
+// document_id — НЕ фильтруем по status: предыдущий раунд к этому моменту уже
+// superseded (HandleSubmit помечает его так при создании новой версии), но
+// documents.id из него нужно переиспользовать, чтобы Sign() увидел историю
+// подписей (см. баг: каждый раунд иначе получал новый documents.id и терял
+// накопленные подписи/QR-штампы предыдущих раундов).
+func (q *Queries) FindLatestLinkedDocumentID(ctx context.Context, arg FindLatestLinkedDocumentIDParams) (uuid.NullUUID, error) {
+	row := q.db.QueryRowContext(ctx, findLatestLinkedDocumentID, arg.ApplicationID, arg.DocumentName)
+	var document_id uuid.NullUUID
+	err := row.Scan(&document_id)
+	return document_id, err
+}
+
 const findPreviousVersions = `-- name: FindPreviousVersions :many
 SELECT id, application_id, document_id, document_name, version, signing_round, source_url, target_url, target_s3_key, status, superseded_by, upload_attempts, last_error, uploaded_at, created_at FROM application_documents
 WHERE application_id = $1 AND document_name = $2 AND status != 'superseded'
