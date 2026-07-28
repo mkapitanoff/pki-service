@@ -3,8 +3,7 @@ package handler
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -24,10 +23,20 @@ type stubNCANode struct {
 
 	gotCMS  string
 	gotHash string
+	// withRevocation фиксирует, что использован вариант с проверкой отзыва.
+	withRevocation bool
 }
 
 func (s *stubNCANode) VerifyCMS(_ context.Context, cmsBase64, docSHA256 string) (*ncanode.VerifyResult, error) {
 	s.gotCMS, s.gotHash = cmsBase64, docSHA256
+	return s.result, s.err
+}
+
+// Вход по ЭЦП обязан ходить именно сюда: этот вариант просит NCANode
+// фактически проверить отзыв сертификата.
+func (s *stubNCANode) VerifyCMSWithRevocation(_ context.Context, cmsBase64, data string) (*ncanode.VerifyResult, error) {
+	s.withRevocation = true
+	s.gotCMS, s.gotHash = cmsBase64, data
 	return s.result, s.err
 }
 
@@ -75,11 +84,18 @@ func TestAuthVerify_Valid(t *testing.T) {
 	require.Equal(t, "070740008101", got.BIN)
 	require.Equal(t, "legal_entity_rep", got.SignerType)
 
-	// Ключевая привязка: NCANode должен получить SHA-256 именно от challenge —
-	// это и есть анти-replay на уровне параметра.
-	sum := sha256.Sum256([]byte("nonce-123"))
-	require.Equal(t, hex.EncodeToString(sum[:]), stub.gotHash)
+	// Привязка к challenge: NCANode должен получить САМО подписанное содержимое,
+	// а не его SHA-256. Казахстанская ЭЦП подписывает ГОСТ-дайджестом, поэтому
+	// передача sha256 не сработала бы никогда (проверено на живом NCANode).
+	// Двойной base64 — потому что NCALayer подписывает переданный base64-текст
+	// как есть (signingParams.decode = false на странице входа).
+	signed := base64.StdEncoding.EncodeToString([]byte("nonce-123"))
+	require.Equal(t, base64.StdEncoding.EncodeToString([]byte(signed)), stub.gotHash)
 	require.Equal(t, "BASE64CMS", stub.gotCMS)
+
+	// Вход обязан требовать проверки отзыва: без неё отозванный сертификат
+	// пустили бы в систему.
+	require.True(t, stub.withRevocation, "вход должен вызывать VerifyCMSWithRevocation")
 }
 
 func TestAuthVerify_InvalidSignature(t *testing.T) {

@@ -1,8 +1,7 @@
 package handler
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"log"
@@ -54,10 +53,11 @@ type authVerifyResponse struct {
 
 // HandleVerifySignature — POST /api/v1/auth/verify-signature.
 //
-// Анти-replay обеспечивается на уровне параметра: NCANode проверяет, что CMS
-// подписан именно над SHA-256(challenge). Свежесть/одноразовость самого
-// challenge — ответственность вызывающего (Keycloak authenticator привязывает
-// его к authSession), здесь это сознательно не хранится.
+// Привязка к challenge обеспечивается на уровне параметра: NCANode сверяет
+// messageDigest из подписи с дайджестом переданного содержимого, то есть подпись
+// не пройдёт, если она сделана не над нашим challenge. Свежесть/одноразовость
+// самого challenge — ответственность вызывающего (Keycloak authenticator
+// привязывает его к authSession), здесь это сознательно не хранится.
 func (h *AuthVerifyHandler) HandleVerifySignature(w http.ResponseWriter, r *http.Request) {
 	var req authVerifyRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -74,12 +74,25 @@ func (h *AuthVerifyHandler) HandleVerifySignature(w http.ResponseWriter, r *http
 		return
 	}
 
-	// Detached-подпись: NCANode сверяет signed-attributes hash с этим значением,
-	// что и связывает подпись с конкретным выданным challenge.
-	sum := sha256.Sum256([]byte(req.Challenge))
-	challengeHashHex := hex.EncodeToString(sum[:])
+	// Detached-подпись: NCANode сам считает дайджест подписанного содержимого и
+	// сверяет его с messageDigest из signed-attributes — это и связывает подпись
+	// с конкретным выданным challenge.
+	//
+	// ВАЖНО (проверено на живом NCANode 2026-07-28, реальная ЭЦП ГОСТ-2022):
+	// сюда НЕЛЬЗЯ передавать sha256(challenge). Казахстанская ЭЦП подписывает
+	// ГОСТ-дайджестом (64 байта), sha256 (32 байта) с ним не совпадёт никогда.
+	// NCANode ждёт в data САМО подписанное содержимое в base64 и хэширует его сам.
+	//
+	// Что именно подписано: страница входа передаёт в NCALayer
+	// args.data = base64(challenge) при signingParams.decode = false, а значит
+	// NCALayer подписывает ЭТОТ BASE64-ТЕКСТ как есть. Отсюда двойное кодирование
+	// ниже — оно не описка. Если на клиенте когда-нибудь поставят decode = true,
+	// подписан будет уже сам challenge, и здесь останется один слой base64;
+	// менять обе стороны только вместе.
+	signedContent := base64.StdEncoding.EncodeToString([]byte(req.Challenge))
+	data := base64.StdEncoding.EncodeToString([]byte(signedContent))
 
-	vr, err := h.nc.VerifyCMS(r.Context(), req.CMS, challengeHashHex)
+	vr, err := h.nc.VerifyCMSWithRevocation(r.Context(), req.CMS, data)
 	if err != nil {
 		switch {
 		case errors.Is(err, ncanode.ErrCMSInvalid):

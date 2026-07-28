@@ -38,6 +38,13 @@ func (m *MockNCANodeClient) RegisterInvalid(cms string) {
 	m.invalid[cms] = true
 }
 
+// VerifyCMSWithRevocation в моке ведёт себя как VerifyCMS: разница между ними
+// только в том, просит ли реальный клиент NCANode фактически проверить отзыв,
+// а сценарии «отозван / невалиден» задаются через RegisterRevoked/RegisterInvalid.
+func (m *MockNCANodeClient) VerifyCMSWithRevocation(ctx context.Context, cmsBase64 string, data string) (*VerifyResult, error) {
+	return m.VerifyCMS(ctx, cmsBase64, data)
+}
+
 func (m *MockNCANodeClient) VerifyCMS(ctx context.Context, cmsBase64 string, docSHA256 string) (*VerifyResult, error) {
 	m.mu.RLock()
 	invalid := m.invalid[cmsBase64]

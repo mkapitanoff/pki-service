@@ -51,6 +51,8 @@ type VerifyResult struct {
 // this package.
 type NCANodeClient interface {
 	VerifyCMS(ctx context.Context, cmsBase64 string, docSHA256 string) (*VerifyResult, error)
+	// VerifyCMSWithRevocation дополнительно требует проверки отзыва (для входа по ЭЦП).
+	VerifyCMSWithRevocation(ctx context.Context, cmsBase64 string, data string) (*VerifyResult, error)
 	GetTSP(ctx context.Context, dataSHA256 string) (time.Time, error)
 }
 
@@ -87,6 +89,11 @@ func NewHTTPClient(opts Options) *HTTPClient {
 type cmsVerifyRequest struct {
 	CMS  string `json:"cms"`
 	Data string `json:"data"`
+	// RevocationCheck просит NCANode реально сходить за статусом отзыва.
+	// БЕЗ него revocations в ответе пустой и отзыв НЕ проверяется вовсе
+	// (проверено на живом NCANode 3.x 2026-07-28).
+	// omitempty обязателен: signing-поток шлёт запрос без этого поля, как и раньше.
+	RevocationCheck []string `json:"revocationCheck,omitempty"`
 }
 
 type tspCreateRequest struct {
@@ -123,6 +130,15 @@ type ncaCertificate struct {
 	NotAfter     time.Time  `json:"notAfter"`
 	KeyUsage     string     `json:"keyUsage"`
 	OCSP         *ncaOCSP   `json:"ocsp"`
+	// NCANode 3.x кладёт результат проверки отзыва сюда, а не в OCSP:
+	// [{"revoked":false,"by":"CRL"},{"revoked":false,"by":"OCSP"}].
+	// Поле ocsp у этой версии всегда null.
+	Revocations []ncaRevocation `json:"revocations"`
+}
+
+type ncaRevocation struct {
+	Revoked bool   `json:"revoked"`
+	By      string `json:"by"`
 }
 
 type ncaSigner struct {
@@ -188,17 +204,29 @@ func normalizeCMS(cms string) string {
 //
 // Strategy: try with docSHA256 first; if NCANode rejects with "content hash found in
 // signed attributes different", the CMS is attached — retry with empty data.
+// VerifyCMSWithRevocation — как VerifyCMS, но дополнительно требует от NCANode
+// фактической проверки отзыва (CRL+OCSP). Нужен для ВХОДА по ЭЦП: там отзыв
+// сертификата обязан блокировать аутентификацию. Signing-поток намеренно
+// продолжает использовать VerifyCMS без изменений.
+func (c *HTTPClient) VerifyCMSWithRevocation(ctx context.Context, cmsBase64 string, data string) (*VerifyResult, error) {
+	return c.verifyCMS(ctx, cmsBase64, data, []string{"CRL", "OCSP"})
+}
+
 func (c *HTTPClient) VerifyCMS(ctx context.Context, cmsBase64 string, docSHA256 string) (*VerifyResult, error) {
+	return c.verifyCMS(ctx, cmsBase64, docSHA256, nil)
+}
+
+func (c *HTTPClient) verifyCMS(ctx context.Context, cmsBase64 string, docSHA256 string, revocationCheck []string) (*VerifyResult, error) {
 	normalized := normalizeCMS(cmsBase64)
 
 	var resp cmsVerifyResponse
-	err := c.postJSON(ctx, "/cms/verify", cmsVerifyRequest{CMS: normalized, Data: docSHA256}, &resp)
+	err := c.postJSON(ctx, "/cms/verify", cmsVerifyRequest{CMS: normalized, Data: docSHA256, RevocationCheck: revocationCheck}, &resp)
 	if err != nil {
 		// Attached CMS: the signed attributes contain the hash of the embedded content,
 		// not of our stored document. Retry with empty data so NCANode verifies internally.
 		if strings.Contains(err.Error(), "content hash found in signed attributes different") {
 			var resp2 cmsVerifyResponse
-			if err2 := c.postJSON(ctx, "/cms/verify", cmsVerifyRequest{CMS: normalized, Data: ""}, &resp2); err2 != nil {
+			if err2 := c.postJSON(ctx, "/cms/verify", cmsVerifyRequest{CMS: normalized, Data: "", RevocationCheck: revocationCheck}, &resp2); err2 != nil {
 				return nil, err2
 			}
 			resp = resp2
@@ -220,7 +248,7 @@ func (c *HTTPClient) VerifyCMS(ctx context.Context, cmsBase64 string, docSHA256 
 		return nil, ErrCMSInvalid
 	}
 
-	ocspStatus := normalizeOCSP(cert.OCSP)
+	ocspStatus := revocationStatus(cert.Revocations, cert.OCSP)
 	if ocspStatus == OCSPStatusRevoked {
 		return nil, ErrCertRevoked
 	}
@@ -269,6 +297,20 @@ func (c *HTTPClient) GetTSP(ctx context.Context, dataSHA256 string) (time.Time, 
 		return time.Time{}, fmt.Errorf("ncanode: tsp response missing genTime")
 	}
 	return resp.TSP.GenTime, nil
+}
+
+// revocationStatus выводит статус из revocations[]; при пустом списке —
+// падает обратно на поле ocsp (сохраняет прежнее поведение signing-потока).
+func revocationStatus(revs []ncaRevocation, o *ncaOCSP) string {
+	if len(revs) == 0 {
+		return normalizeOCSP(o)
+	}
+	for _, r := range revs {
+		if r.Revoked {
+			return OCSPStatusRevoked
+		}
+	}
+	return OCSPStatusGood
 }
 
 func normalizeOCSP(o *ncaOCSP) string {
