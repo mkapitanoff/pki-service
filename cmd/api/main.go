@@ -91,6 +91,9 @@ func main() {
 	batchHandler := handler.NewBatchHandler(signSvc, queries, store, cfg.App.VerifyBaseURL, ncClient)
 	adminHandler := handler.NewAdminHandler(queries, authSvc)
 	webhookHandler := handler.NewWebhookHandler(queries)
+	// Верификация ЭЦП при входе (Keycloak EDS-authenticator) — только крипто,
+	// без БД/S3: переиспользует ту же границу ncClient, что и подписание.
+	authVerifyHandler := handler.NewAuthVerifyHandler(ncClient)
 
 	extS3 := s3client.NewHTTPExternalS3Client()
 	appHandler := handler.NewApplicationHandler(queries, signSvc, extS3, store)
@@ -352,6 +355,13 @@ func main() {
 			s.Post("/sign/initiate", signInitiateHandler.HandleInitiate)
 			s.Post("/sign/complete", signCompleteHandler.HandleComplete)
 			s.Patch("/sign/refresh-urls", signStatusHandler.HandleRefreshURLs)
+		})
+
+		// Верификация ЭЦП при ВХОДЕ (не подписание документа) — для Keycloak
+		// EDS-authenticator. Stateless, аддитивно к signing-потоку.
+		api.Group(func(av chi.Router) {
+			av.Use(handler.MaxBytes(jsonBodyLimit))
+			av.Post("/auth/verify-signature", authVerifyHandler.HandleVerifySignature)
 		})
 		api.Get("/sign/status/{session_id}", signStatusHandler.HandleGetStatus)
 

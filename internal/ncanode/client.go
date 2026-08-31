@@ -25,15 +25,12 @@ const signFormatCAdES = "CAdES (CMS, PKCS#7)"
 // Sentinel errors returned by the client. Callers (sign service) map these to
 // typed AppErrors at the boundary.
 var (
-	ErrCMSInvalid  = errors.New("ncanode: CMS signature is invalid")
-	ErrCertRevoked = errors.New("ncanode: certificate is revoked")
+	ErrCMSInvalid       = errors.New("ncanode: CMS signature is invalid")
+	ErrCertRevoked      = errors.New("ncanode: certificate is revoked")
+	ErrCertInvalidUsage = errors.New("ncanode: certificate key usage does not permit signing")
 	// ErrCertStatusUnknown — отозванность сертификата не подтверждена (OCSP
-	// недоступен / статус unknown). По Правилам проверки ЭЦП (п.6.2) отозванность
-	// должна быть подтверждена, поэтому неопределённый статус — fail-closed.
+	// unknown). Возвращается вызывающими, которым нужен fail-closed режим.
 	ErrCertStatusUnknown = errors.New("ncanode: certificate revocation status could not be determined (OCSP unknown)")
-	// ErrCertInvalidUsage — KeyUsage сертификата не допускает ЭЦП (нет
-	// nonRepudiation). Сертификат аутентификации для подписи недопустим (п.6.3).
-	ErrCertInvalidUsage = errors.New("ncanode: certificate key usage does not permit signing (nonRepudiation required)")
 )
 
 // VerifyResult is the normalized result of a CMS verification.
@@ -59,6 +56,8 @@ type VerifyResult struct {
 // this package.
 type NCANodeClient interface {
 	VerifyCMS(ctx context.Context, cmsBase64 string, docSHA256 string) (*VerifyResult, error)
+	// VerifyCMSWithRevocation дополнительно требует проверки отзыва (для входа по ЭЦП).
+	VerifyCMSWithRevocation(ctx context.Context, cmsBase64 string, data string) (*VerifyResult, error)
 	GetTSP(ctx context.Context, dataSHA256 string) (time.Time, error)
 }
 
@@ -95,6 +94,11 @@ func NewHTTPClient(opts Options) *HTTPClient {
 type cmsVerifyRequest struct {
 	CMS  string `json:"cms"`
 	Data string `json:"data"`
+	// RevocationCheck просит NCANode реально сходить за статусом отзыва.
+	// БЕЗ него revocations в ответе пустой и отзыв НЕ проверяется вовсе
+	// (проверено на живом NCANode 3.x 2026-07-28).
+	// omitempty обязателен: signing-поток шлёт запрос без этого поля, как и раньше.
+	RevocationCheck []string `json:"revocationCheck,omitempty"`
 }
 
 type tspCreateRequest struct {
@@ -112,24 +116,34 @@ type ncaIssuer struct {
 	CommonName string `json:"commonName"`
 }
 
+type ncaOCSP struct {
+	Status      string    `json:"status"`
+	RevokedAt   time.Time `json:"revokedAt"`
+	CheckedTime time.Time `json:"genTime"`
+}
+
 type ncaTSP struct {
 	GenTime time.Time `json:"genTime"`
 }
 
-// ncaCertificate — форма ответа NCANode 3.4.1 (проверено на прод-трафике):
-// отзыв сертификата отражён массивом "revocations" (события от
-// сконфигурированных CRL/OCSP-источников, см. NCANODE_OCSP_URL/
-// NCANODE_CRL_URL), а не отдельным объектом "ocsp" — такого поля в реальном
-// ответе нет.
 type ncaCertificate struct {
-	Valid        bool              `json:"valid"`
-	Subject      ncaSubject        `json:"subject"`
-	Issuer       ncaIssuer         `json:"issuer"`
-	SerialNumber string            `json:"serialNumber"`
-	NotBefore    time.Time         `json:"notBefore"`
-	NotAfter     time.Time         `json:"notAfter"`
-	KeyUsage     string            `json:"keyUsage"`
-	Revocations  []json.RawMessage `json:"revocations"`
+	Valid        bool       `json:"valid"`
+	Subject      ncaSubject `json:"subject"`
+	Issuer       ncaIssuer  `json:"issuer"`
+	SerialNumber string     `json:"serialNumber"`
+	NotBefore    time.Time  `json:"notBefore"`
+	NotAfter     time.Time  `json:"notAfter"`
+	KeyUsage     string     `json:"keyUsage"`
+	OCSP         *ncaOCSP   `json:"ocsp"`
+	// NCANode 3.x кладёт результат проверки отзыва сюда, а не в OCSP:
+	// [{"revoked":false,"by":"CRL"},{"revoked":false,"by":"OCSP"}].
+	// Поле ocsp у этой версии всегда null.
+	Revocations []ncaRevocation `json:"revocations"`
+}
+
+type ncaRevocation struct {
+	Revoked bool   `json:"revoked"`
+	By      string `json:"by"`
 }
 
 type ncaSigner struct {
@@ -195,17 +209,29 @@ func normalizeCMS(cms string) string {
 //
 // Strategy: try with docSHA256 first; if NCANode rejects with "content hash found in
 // signed attributes different", the CMS is attached — retry with empty data.
+// VerifyCMSWithRevocation — как VerifyCMS, но дополнительно требует от NCANode
+// фактической проверки отзыва (CRL+OCSP). Нужен для ВХОДА по ЭЦП: там отзыв
+// сертификата обязан блокировать аутентификацию. Signing-поток намеренно
+// продолжает использовать VerifyCMS без изменений.
+func (c *HTTPClient) VerifyCMSWithRevocation(ctx context.Context, cmsBase64 string, data string) (*VerifyResult, error) {
+	return c.verifyCMS(ctx, cmsBase64, data, []string{"CRL", "OCSP"})
+}
+
 func (c *HTTPClient) VerifyCMS(ctx context.Context, cmsBase64 string, docSHA256 string) (*VerifyResult, error) {
+	return c.verifyCMS(ctx, cmsBase64, docSHA256, nil)
+}
+
+func (c *HTTPClient) verifyCMS(ctx context.Context, cmsBase64 string, docSHA256 string, revocationCheck []string) (*VerifyResult, error) {
 	normalized := normalizeCMS(cmsBase64)
 
 	var resp cmsVerifyResponse
-	err := c.postJSON(ctx, "/cms/verify", cmsVerifyRequest{CMS: normalized, Data: docSHA256}, &resp)
+	err := c.postJSON(ctx, "/cms/verify", cmsVerifyRequest{CMS: normalized, Data: docSHA256, RevocationCheck: revocationCheck}, &resp)
 	if err != nil {
 		// Attached CMS: the signed attributes contain the hash of the embedded content,
 		// not of our stored document. Retry with empty data so NCANode verifies internally.
 		if strings.Contains(err.Error(), "content hash found in signed attributes different") {
 			var resp2 cmsVerifyResponse
-			if err2 := c.postJSON(ctx, "/cms/verify", cmsVerifyRequest{CMS: normalized, Data: ""}, &resp2); err2 != nil {
+			if err2 := c.postJSON(ctx, "/cms/verify", cmsVerifyRequest{CMS: normalized, Data: "", RevocationCheck: revocationCheck}, &resp2); err2 != nil {
 				return nil, err2
 			}
 			resp = resp2
@@ -234,16 +260,15 @@ func (c *HTTPClient) VerifyCMS(ctx context.Context, cmsBase64 string, docSHA256 
 		return nil, ErrCertInvalidUsage
 	}
 
-	// п.6.2: отозванность должна быть ПОДТВЕРЖДЕНА. NCANode 3.4.1 сам выполняет
-	// CRL/OCSP-проверку (сконфигурирована через NCANODE_OCSP_URL/CRL_URL) и
-	// отражает результат в "revocations": пустой список при valid=true —
-	// сертификат подтверждённо не отозван; непустой — отозван.
-	ocspStatus := OCSPStatusGood
-	if len(cert.Revocations) > 0 {
+	ocspStatus := revocationStatus(cert.Revocations, cert.OCSP)
+	if ocspStatus == OCSPStatusRevoked {
 		return nil, ErrCertRevoked
 	}
 
 	ocspCheckedAt := time.Now().UTC()
+	if cert.OCSP != nil && !cert.OCSP.CheckedTime.IsZero() {
+		ocspCheckedAt = cert.OCSP.CheckedTime
+	}
 
 	var tspTime time.Time
 	if signer.TSP != nil {
@@ -284,6 +309,34 @@ func (c *HTTPClient) GetTSP(ctx context.Context, dataSHA256 string) (time.Time, 
 		return time.Time{}, fmt.Errorf("ncanode: tsp response missing genTime")
 	}
 	return resp.TSP.GenTime, nil
+}
+
+// revocationStatus выводит статус из revocations[]; при пустом списке —
+// падает обратно на поле ocsp (сохраняет прежнее поведение signing-потока).
+func revocationStatus(revs []ncaRevocation, o *ncaOCSP) string {
+	if len(revs) == 0 {
+		return normalizeOCSP(o)
+	}
+	for _, r := range revs {
+		if r.Revoked {
+			return OCSPStatusRevoked
+		}
+	}
+	return OCSPStatusGood
+}
+
+func normalizeOCSP(o *ncaOCSP) string {
+	if o == nil {
+		return OCSPStatusUnknown
+	}
+	switch strings.ToLower(strings.TrimSpace(o.Status)) {
+	case "good", "active":
+		return OCSPStatusGood
+	case "revoked":
+		return OCSPStatusRevoked
+	default:
+		return OCSPStatusUnknown
+	}
 }
 
 // keyUsagePermitsSigning проверяет, что KeyUsage сертификата допускает ЭЦП.

@@ -45,6 +45,8 @@ func TestVerifyCMS_Success(t *testing.T) {
 						Organization: "ТОО МеталлОптТорг KZ",
 					},
 					Issuer: ncaIssuer{CommonName: "ҰЛТТЫҚ КУӘЛАНДЫРУШЫ ОРТАЛЫҚ"},
+					// проверка отзыва выполнена и подтвердила: не отозван
+					Revocations: []ncaRevocation{{Revoked: false, By: "OCSP"}},
 				}},
 				TSP: &ncaTSP{GenTime: time.Date(2026, 5, 15, 10, 0, 1, 0, time.UTC)},
 			}},
@@ -79,7 +81,7 @@ func TestVerifyCMS_RevokedReturnsError(t *testing.T) {
 					SerialNumber: "ABC",
 					Subject:      ncaSubject{CommonName: "X", IIN: "000000000000"},
 					Issuer:       ncaIssuer{CommonName: "CA"},
-					Revocations:  []json.RawMessage{json.RawMessage(`{"reason":"revoked"}`)},
+					Revocations:  []ncaRevocation{{Revoked: true, By: "OCSP"}},
 				}},
 			}},
 		}
@@ -204,9 +206,10 @@ func TestVerifyCMS_SignCertAccepted(t *testing.T) {
 			Valid: true,
 			Signers: []ncaSigner{{
 				Certificates: []ncaCertificate{{
-					Valid:    true,
-					KeyUsage: "SIGN",
-					Subject:  ncaSubject{CommonName: "X", IIN: "000000000000"},
+					Valid:       true,
+					KeyUsage:    "SIGN",
+					Subject:     ncaSubject{CommonName: "X", IIN: "000000000000"},
+					Revocations: []ncaRevocation{{Revoked: false, By: "OCSP"}},
 				}},
 			}},
 		}
@@ -266,8 +269,9 @@ func TestVerifyCMS_EmptyKeyUsageAccepted(t *testing.T) {
 	require.True(t, res.Valid)
 }
 
-// "revocations" отсутствует/пуст (нормальный случай — реальный формат
-// NCANode 3.4.1, проверено на прод-трафике) → не блокируем.
+// "revocations" пуст (signing-поток не запрашивает revocationCheck, NCANode
+// отзыв не проверяет) → подписание НЕ блокируем, но статус честно "unknown",
+// а не "good": проверка отзыва фактически не выполнялась.
 func TestVerifyCMS_EmptyRevocationsAccepted(t *testing.T) {
 	c, srv := newTestClient(func(w http.ResponseWriter, r *http.Request) {
 		resp := cmsVerifyResponse{
@@ -277,7 +281,7 @@ func TestVerifyCMS_EmptyRevocationsAccepted(t *testing.T) {
 					Valid:       true,
 					KeyUsage:    "SIGN",
 					Subject:     ncaSubject{CommonName: "X", IIN: "000000000000"},
-					Revocations: []json.RawMessage{},
+					Revocations: []ncaRevocation{},
 				}},
 			}},
 		}
@@ -289,7 +293,7 @@ func TestVerifyCMS_EmptyRevocationsAccepted(t *testing.T) {
 	res, err := c.VerifyCMS(context.Background(), "CMS", "hash")
 	require.NoError(t, err)
 	require.True(t, res.Valid)
-	require.Equal(t, OCSPStatusGood, res.OCSPStatus)
+	require.Equal(t, OCSPStatusUnknown, res.OCSPStatus)
 }
 
 // guard: sentinel errors are distinct
